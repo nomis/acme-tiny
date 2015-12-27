@@ -1,9 +1,6 @@
-#!/usr/bin/env python
-import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging
-try:
-    from urllib.request import urlopen # Python 3
-except ImportError:
-    from urllib2 import urlopen # Python 2
+#!/usr/bin/env python3
+import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, pprint
+from urllib.request import urlopen
 
 #DEFAULT_CA = "https://acme-staging.api.letsencrypt.org"
 DEFAULT_CA = "https://acme-v01.api.letsencrypt.org"
