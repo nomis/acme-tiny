@@ -85,15 +85,16 @@ def register(account_key, email, log=LOGGER, CA=DEFAULT_CA):
 		raise ValueError("Error registering: {0} {1}".format(code, result))
 
 class ChallengeHandler:
-	def __init__(self, hostname, data, account_key):
+	def __init__(self, hostname, data, account_key, log):
 		self.account_key = account_key
+		self.log = log
 		self.hostname = hostname
 		self.type = data["type"]
 		self.uri = data["uri"]
 		self.token = re.sub(r"[^A-Za-z0-9_\-]", "_", data["token"])
 		self.keyauthorization = "{0}.{1}".format(self.token, account_key["thumbprint"])
 
-	def valid(self, log):
+	def valid(self):
 		# notify challenge are met
 		code, result, headers = _send_signed_request(self.account_key, self.uri, {
 			"resource": "challenge",
@@ -101,7 +102,6 @@ class ChallengeHandler:
 		})
 		if code != 202:
 			raise ValueError("Error triggering challenge: {0} {1}".format(code, result))
-
 		# wait for challenge to be verified
 		attempts = 10
 		while attempts > 0:
@@ -124,8 +124,8 @@ class ChallengeHandler:
 		return False
 
 class Http01ChallengeHandler(ChallengeHandler):
-	def __init__(self, hostname, data, account_key, config):
-		super().__init__(hostname, data, account_key)
+	def __init__(self, hostname, data, account_key, config, log):
+		super().__init__(hostname, data, account_key, log)
 		path = config.get("http-01_dir")
 		self.wellknown_path = os.path.join(path, self.token) if path else None
 
@@ -140,7 +140,7 @@ class Http01ChallengeHandler(ChallengeHandler):
 		if self.wellknown_path:
 			os.remove(self.wellknown_path)
 
-	def valid(self, log):
+	def valid(self):
 		if not self.wellknown_path:
 			return False
 
@@ -154,11 +154,11 @@ class Http01ChallengeHandler(ChallengeHandler):
 			raise ValueError("Wrote file to {0}, but couldn't download {1}".format(
 				self.wellknown_path, wellknown_url))
 
-		return super().valid(log)
+		return super().valid()
 
 class Dns01ChallengeHandler(ChallengeHandler):
-	def __init__(self, hostname, data, account_key, config):
-		super().__init__(hostname, data, account_key)
+	def __init__(self, hostname, data, account_key, config, log):
+		super().__init__(hostname, data, account_key, log)
 		self.zone_file = config.get("dns-01_file")
 		self.zone_name = config.get("dns-01_name")
 		self.zone_cmd = config.get("dns-01_cmd")
@@ -182,7 +182,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 
 	def reload(self):
 		if self.zone_cmd:
-			log.info(subprocess.check_output(self.zone_cmd, shell=True).decode("utf8"))
+			self.log.info(subprocess.check_output(self.zone_cmd, shell=True).decode("utf8"))
 
 	def _find_ns(self):
 		name = dns.name.from_text(self.hostname)
@@ -200,7 +200,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 
 		return ns
 
-	def valid(self, log):
+	def valid(self):
 		if not self.zone_file or not self.zone_cmd:
 			return False
 
@@ -222,13 +222,13 @@ class Dns01ChallengeHandler(ChallengeHandler):
 			q.flags |= dns.flags.AD
 			for ns in nameservers:
 				try:
-					log.info("Query " + ns + "...")
+					self.log.info("Query " + ns + "...")
 					m = dns.query.udp(q, ns, timeout=5)
 					ok = False
 					for rrset in m.answer:
 						for rdata in rrset:
 							if rdata.strings[0] == self.txt_value:
-								log.info(" OK")
+								self.log.info(" OK")
 								ok = True
 					if ok:
 						success = True
@@ -242,8 +242,8 @@ class Dns01ChallengeHandler(ChallengeHandler):
 					pass
 
 			if success and not failed:
-				return super().valid(log)
-			log.info("Retrying")
+				return super().valid()
+			self.log.info("Retrying")
 
 		return false
 
@@ -278,7 +278,7 @@ def cert(account_key, config_file, private_key_file, log=LOGGER, CA=DEFAULT_CA):
 		for challenge in challenges:
 			if challenge["type"] in CHALLENGE_TYPES:
 				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, account_key, config[hostname]) as c:
-					valid = valid or c.valid(log)
+					valid = valid or c.valid()
 
 	if not valid:
 		raise ValueError("No valid challenge types")
