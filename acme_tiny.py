@@ -277,7 +277,7 @@ def cert(account_key, config_file, private_key_file, log=LOGGER, CA=DEFAULT_CA):
 		challenges = json.loads(result.decode("utf8"))["challenges"]
 		for challenge in challenges:
 			if challenge["type"] in CHALLENGE_TYPES:
-				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, account_key, config[hostname]) as c:
+				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, account_key, config[hostname], log) as c:
 					valid = valid or c.valid()
 
 	if not valid:
