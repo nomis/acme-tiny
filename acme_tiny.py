@@ -274,14 +274,17 @@ def cert(account_key, config_file, private_key_file, log=LOGGER, CA=DEFAULT_CA):
 
 		# make the challenge file
 		challenges = json.loads(result.decode("utf8"))["challenges"]
+		ok = False
 		for challenge in challenges:
 			if challenge["type"] in CHALLENGE_TYPES:
 				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, account_key, config[hostname], log) as c:
 					if c.valid():
 						valid += 1
+						ok = True
 						break
 
-		raise ValueError("No valid challenge types for {0}".format(hostname))
+		if not ok:
+			raise ValueError("No valid challenge types for {0}".format(hostname))
 
 	if valid != len(hostnames):
 		raise ValueError("Unable to validate all hostnames ({0} < {1})".format(valid, len(hostnames)))
