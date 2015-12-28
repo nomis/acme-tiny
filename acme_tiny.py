@@ -281,10 +281,10 @@ def cert(account_key, config_file, private_key_file, log=LOGGER, CA=DEFAULT_CA):
 						valid += 1
 						break
 
-		raise ValueError("No valid challenge types")
+		raise ValueError("No valid challenge types for {0}".format(hostname))
 
 	if valid != len(hostnames):
-		raise ValueError("Unable to validate all hostnames")
+		raise ValueError("Unable to validate all hostnames ({0} < {1})".format(valid, len(hostnames)))
 
 	# get the new certificate
 	log.info("Signing certificate...")
