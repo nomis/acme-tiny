@@ -164,7 +164,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 		self.zone_cmd = config.get("dns-01_cmd")
 		if not self.zone_name:
 			self.zone_name = "_acme-challenge." + hostname + "."
-		self.txt_value = _b64(hashlib.sha256(self.keyauthorization.encode("utf8")).digest())
+		self.txt_value = hashlib.sha256(self.keyauthorization.encode("utf8")).hexdigest()
 
 	def __enter__(self):
 		if self.zone_file:
@@ -227,17 +227,20 @@ class Dns01ChallengeHandler(ChallengeHandler):
 					for rrset in m.answer:
 						for rdata in rrset:
 							if rdata.rdtype == dns.rdatatype.TXT and rdata.strings[0] == self.txt_value:
-								self.log.info(" OK")
+								self.log.info("  OK")
 								ok = True
 					if ok:
 						success = True
 					else:
+						self.log.info("  No matching data")
 						failed = True
 				except OSError:
 					# Ignore unreachable errors
+					self.log.info("  Error")
 					pass
 				except dns.exception.Timeout:
 					# Ignore timeouts
+					self.log.info("  Timeout")
 					pass
 
 			if success and not failed:
