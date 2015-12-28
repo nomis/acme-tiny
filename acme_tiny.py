@@ -93,7 +93,7 @@ class ChallengeHandler:
 		self.token = re.sub(r"[^A-Za-z0-9_\-]", "_", data["token"])
 		self.keyauthorization = "{0}.{1}".format(self.token, account_key["thumbprint"])
 
-	def valid(self):
+	def valid(self, log):
 		# notify challenge are met
 		code, result, headers = _send_signed_request(self.account_key, self.uri, {
 			"resource": "challenge",
@@ -140,7 +140,7 @@ class Http01ChallengeHandler(ChallengeHandler):
 		if self.wellknown_path:
 			os.remove(self.wellknown_path)
 
-	def valid(self):
+	def valid(self, log):
 		if not self.wellknown_path:
 			return False
 
@@ -154,7 +154,7 @@ class Http01ChallengeHandler(ChallengeHandler):
 			raise ValueError("Wrote file to {0}, but couldn't download {1}".format(
 				self.wellknown_path, wellknown_url))
 
-		return super().valid()
+		return super().valid(log)
 
 class Dns01ChallengeHandler(ChallengeHandler):
 	def __init__(self, hostname, data, account_key, config):
@@ -182,7 +182,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 
 	def reload(self):
 		if self.zone_cmd:
-			print(subprocess.check_output(self.zone_cmd, shell=True).decode("utf8"))
+			log.info(subprocess.check_output(self.zone_cmd, shell=True).decode("utf8"))
 
 	def _find_ns(self):
 		name = dns.name.from_text(self.hostname)
@@ -200,7 +200,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 
 		return ns
 
-	def valid(self):
+	def valid(self, log):
 		if not self.zone_file or not self.zone_cmd:
 			return False
 
@@ -222,13 +222,13 @@ class Dns01ChallengeHandler(ChallengeHandler):
 			q.flags |= dns.flags.AD
 			for ns in nameservers:
 				try:
-					print("Query " + ns + "...")
+					log.info("Query " + ns + "...")
 					m = dns.query.udp(q, ns, timeout=5)
 					ok = False
 					for rrset in m.answer:
 						for rdata in rrset:
 							if rdata.strings[0] == self.txt_value:
-								print(" OK")
+								log.info(" OK")
 								ok = True
 					if ok:
 						success = True
@@ -242,8 +242,8 @@ class Dns01ChallengeHandler(ChallengeHandler):
 					pass
 
 			if success and not failed:
-				return super().valid()
-			print("Retrying")
+				return super().valid(log)
+			log.info("Retrying")
 
 		return false
 
@@ -278,7 +278,7 @@ def cert(account_key, config_file, private_key_file, log=LOGGER, CA=DEFAULT_CA):
 		for challenge in challenges:
 			if challenge["type"] in CHALLENGE_TYPES:
 				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, account_key, config[hostname]) as c:
-					valid = valid or c.valid()
+					valid = valid or c.valid(log)
 
 	if not valid:
 		raise ValueError("No valid challenge types")
