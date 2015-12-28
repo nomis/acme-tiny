@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, configparser, dns.resolver, dns.name, dns.query, dns.message, dns.exception, dns.flags
+import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, configparser, dns.resolver, dns.name, dns.query, dns.message, dns.exception, dns.flags, dns.rdatatype
 from urllib.request import urlopen
 
 DEFAULT_CA = "https://acme-staging.api.letsencrypt.org"
@@ -227,7 +227,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 					ok = False
 					for rrset in m.answer:
 						for rdata in rrset:
-							if rdata.strings[0] == self.txt_value:
+							if rdata.rdtype == dns.rdatatype.TXT and rdata.strings[0] == self.txt_value:
 								self.log.info(" OK")
 								ok = True
 					if ok:
