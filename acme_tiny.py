@@ -219,7 +219,6 @@ class Dns01ChallengeHandler(ChallengeHandler):
 			failed = False
 			q = dns.message.make_query("_acme-challenge." + self.hostname + ".", "TXT")
 			q.flags &= ~dns.flags.RD
-			q.flags |= dns.flags.AD
 			for ns in nameservers:
 				try:
 					self.log.info("Query " + ns + "...")
