@@ -258,7 +258,7 @@ def cert(account_key, config_file, private_key_file, log=LOGGER, CA=DEFAULT_CA):
 	config.read(config_file)
 
 	hostnames = config.sections()
-	valid = False
+	valid = 0
 
 	# verify each hostname
 	for hostname in hostnames:
@@ -277,10 +277,14 @@ def cert(account_key, config_file, private_key_file, log=LOGGER, CA=DEFAULT_CA):
 		for challenge in challenges:
 			if challenge["type"] in CHALLENGE_TYPES:
 				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, account_key, config[hostname], log) as c:
-					valid = valid or c.valid()
+					if c.valid():
+						valid += 1
+						break
 
-	if not valid:
 		raise ValueError("No valid challenge types")
+
+	if valid != len(hostnames):
+		raise ValueError("Unable to validate all hostnames")
 
 	# get the new certificate
 	log.info("Signing certificate...")
