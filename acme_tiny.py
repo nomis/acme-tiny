@@ -116,7 +116,7 @@ class ChallengeHandler:
 			if challenge_status["status"] == "pending":
 				time.sleep(2)
 			elif challenge_status["status"] == "valid":
-				log.info("{0} verified!".format(self.hostname))
+				self.log.info("{0} verified!".format(self.hostname))
 				return True
 			else:
 				raise ValueError("{0} challenge did not pass: {1}".format(
