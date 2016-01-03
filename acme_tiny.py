@@ -84,6 +84,23 @@ def register(account_key, email, log=LOGGER, CA=DEFAULT_CA):
 	else:
 		raise ValueError("Error registering: {0} {1}".format(code, result))
 
+def req(config_file, private_key_file, log=LOGGER):
+	config = configparser.ConfigParser()
+	config.read(config_file)
+
+	hostnames = config.sections()
+
+	openssl_config = "[req]\ndistinguished_name=req_distinguished_name\n[req_distinguished_name]\n[SAN]\nsubjectAltName="
+	openssl_config = openssl_config + ",".join(["DNS:" + x for x in hostnames])
+	proc = subprocess.Popen(["openssl", "req", "-new", "-batch", "-nodes", "-key", private_key_file,
+		"-subj", "/CN=" + hostnames[0], "-sha512", "-reqexts", "SAN", "-outform", "PEM", "-config", "/dev/stdin"],
+		stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	csr_pem, err = proc.communicate(input=openssl_config.encode("utf8"))
+	if err:
+		raise ValueError("Error creating certificate request:\n{0}".format(err.decode("utf8")))
+
+	return csr_pem
+
 class ChallengeHandler:
 	def __init__(self, hostname, data, account_key, log):
 		self.account_key = account_key
@@ -254,7 +271,7 @@ CHALLENGE_TYPES = {
 	"dns-01": Dns01ChallengeHandler,
 }
 
-def cert(account_key, config_file, private_key_file, log=LOGGER, CA=DEFAULT_CA):
+def cert(account_key, config_file, request_file, log=LOGGER, CA=DEFAULT_CA):
 	account_key = get_account_key(account_key, log, CA)
 
 	config = configparser.ConfigParser()
@@ -294,12 +311,9 @@ def cert(account_key, config_file, private_key_file, log=LOGGER, CA=DEFAULT_CA):
 
 	# get the new certificate
 	log.info("Signing certificate...")
-	openssl_config = "[req]\ndistinguished_name=req_distinguished_name\n[req_distinguished_name]\n[SAN]\nsubjectAltName="
-	openssl_config = openssl_config + ",".join(["DNS:" + x for x in hostnames])
-	proc = subprocess.Popen(["openssl", "req", "-new", "-batch", "-nodes", "-key", private_key_file,
-		"-subj", "/CN=" + hostnames[0], "-sha512", "-reqexts", "SAN", "-outform", "DER", "-config", "/dev/stdin"],
-		stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-	csr_der, err = proc.communicate(input=openssl_config.encode("utf8"))
+	proc = subprocess.Popen(["openssl", "req", "-in", request_file, "-outform", "DER"],
+		stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	csr_der, err = proc.communicate()
 	if err:
 		raise ValueError("Error creating certificate request:\n{0}".format(err.decode("utf8")))
 
@@ -325,16 +339,23 @@ def main(argv):
 	parser_reg = subparsers.add_parser("register")
 	parser_reg.add_argument("--email", required=True, help="register account with contact email address")
 
-	parser_cert = subparsers.add_parser("cert")
+	parser_cert = subparsers.add_parser("req")
 	parser_cert.add_argument("--config", required=True, help="path to your certificate configuration file")
 	parser_cert.add_argument("--key", required=True, help="path to your private key")
+
+	parser_cert = subparsers.add_parser("cert")
+	parser_cert.add_argument("--config", required=True, help="path to your certificate configuration file")
+	parser_cert.add_argument("--req", required=True, help="path to your certificate request")
 
 	args = parser.parse_args(argv)
 	LOGGER.setLevel(args.quiet or LOGGER.level)
 	if args.subparser_name == "register":
 		register(args.account_key, args.email, log=LOGGER, CA=args.ca)
+	elif args.subparser_name == "req":
+		signed_req = req(args.config, args.key, log=LOGGER)
+		sys.stdout.write(signed_req)
 	elif args.subparser_name == "cert":
-		signed_crt = cert(args.account_key, args.config, args.key, log=LOGGER, CA=args.ca)
+		signed_crt = cert(args.account_key, args.config, args.req, log=LOGGER, CA=args.ca)
 		sys.stdout.write(signed_crt)
 
 if __name__ == "__main__":
