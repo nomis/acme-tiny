@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, configparser, dns.resolver, dns.name, dns.query, dns.message, dns.exception, dns.flags, dns.rdatatype
 from urllib.request import urlopen
+from urllib.error import HTTPError
 
 DEFAULT_CA = "https://acme-staging.api.letsencrypt.org"
 #DEFAULT_CA = "https://acme-v01.api.letsencrypt.org"
@@ -31,7 +32,7 @@ def _send_signed_request(account_key, url, payload):
 	try:
 		resp = urlopen(url, data.encode("utf8"))
 		return resp.getcode(), resp.read(), resp.headers
-	except IOError as e:
+	except HTTPError as e:
 		return e.code, e.read(), e.headers
 
 def get_account_key(account_key, log=LOGGER, CA=DEFAULT_CA):
