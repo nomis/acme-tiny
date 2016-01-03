@@ -99,7 +99,7 @@ def req(config_file, private_key_file, log=LOGGER):
 	if err:
 		raise ValueError("Error creating certificate request:\n{0}".format(err.decode("utf8")))
 
-	return csr_pem
+	return csr_pem.decode("utf8")
 
 class ChallengeHandler:
 	def __init__(self, hostname, data, account_key, log):
