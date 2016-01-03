@@ -331,19 +331,20 @@ def cert(account_key, config_file, request_file, log=LOGGER, CA=DEFAULT_CA):
 
 def main(argv):
 	parser = argparse.ArgumentParser()
-	parser.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
 	parser.add_argument("--quiet", action="store_const", const=logging.ERROR, help="suppress output except for errors")
 	parser.add_argument("--ca", default=DEFAULT_CA, help="certificate authority, default is Let's Encrypt")
-
 	subparsers = parser.add_subparsers(dest="subparser_name")
+
 	parser_reg = subparsers.add_parser("register")
+	parser_reg.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
 	parser_reg.add_argument("--email", required=True, help="register account with contact email address")
 
-	parser_cert = subparsers.add_parser("req")
-	parser_cert.add_argument("--config", required=True, help="path to your certificate configuration file")
-	parser_cert.add_argument("--key", required=True, help="path to your private key")
+	parser_req = subparsers.add_parser("req")
+	parser_req.add_argument("--config", required=True, help="path to your certificate configuration file")
+	parser_req.add_argument("--private-key", required=True, help="path to your private key")
 
 	parser_cert = subparsers.add_parser("cert")
+	parser_cert.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
 	parser_cert.add_argument("--config", required=True, help="path to your certificate configuration file")
 	parser_cert.add_argument("--req", required=True, help="path to your certificate request")
 
@@ -352,7 +353,7 @@ def main(argv):
 	if args.subparser_name == "register":
 		register(args.account_key, args.email, log=LOGGER, CA=args.ca)
 	elif args.subparser_name == "req":
-		signed_req = req(args.config, args.key, log=LOGGER)
+		signed_req = req(args.config, args.private_key, log=LOGGER)
 		sys.stdout.write(signed_req)
 	elif args.subparser_name == "cert":
 		signed_crt = cert(args.account_key, args.config, args.req, log=LOGGER, CA=args.ca)
