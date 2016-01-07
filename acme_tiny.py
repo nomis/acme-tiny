@@ -203,7 +203,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 			self.log.info(subprocess.check_output(self.zone_cmd, shell=True).decode("utf8"))
 
 	def _find_ns(self):
-		name = dns.name.from_text(self.hostname)
+		name = dns.name.from_text(self.zone_name)
 		ns = set()
 		while True:
 			try:
