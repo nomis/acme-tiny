@@ -265,7 +265,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 				return super().valid()
 			self.log.info("Retrying")
 
-		return false
+		return False
 
 CHALLENGE_TYPES = {
 	"http-01": Http01ChallengeHandler,
