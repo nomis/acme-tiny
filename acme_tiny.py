@@ -215,6 +215,8 @@ class Dns01ChallengeHandler(ChallengeHandler):
 				break
 			except dns.resolver.NXDOMAIN:
 				name = name.parent()
+			except dns.resolver.NoAnswer:
+				name = name.parent()
 
 		return ns
 
