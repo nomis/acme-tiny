@@ -184,17 +184,30 @@ class Dns01ChallengeHandler(ChallengeHandler):
 			self.zone_name = "_acme-challenge." + hostname + "."
 		self.txt_value = _b64(hashlib.sha256(self.keyauthorization.encode("utf8")).digest())
 
+	def _update_zone_file(self):
+		content = ""
+
+		with open(self.zone_file, "r") as f:
+			for line in f:
+				if line.startswith(self.zone_name + " "):
+					content += self.zone_name + ' 1 TXT "' + self.txt_value + '"\n'
+				else:
+					content += line
+
+		with open(self.zone_file, "w") as f:
+			f.write(content)
+
 	def __enter__(self):
 		if self.zone_file:
-			with open(self.zone_file, "w") as f:
-				f.write(self.zone_name + ' 1 TXT "' + self.txt_value + '"\n')
+			self._update_zone_file()
 
 		return self
 
 	def __exit__(self, type, value, traceback):
+		self.txt_value = ""
+
 		if self.zone_file:
-			with open(self.zone_file, "w") as f:
-				f.write(self.zone_name + ' 1 TXT ""\n')
+			self._update_zone_file()
 
 			self.reload()
 
