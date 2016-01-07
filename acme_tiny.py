@@ -182,7 +182,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 		self.zone_cmd = config.get("dns-01_cmd")
 		if not self.zone_name:
 			self.zone_name = "_acme-challenge." + hostname + "."
-		self.txt_value = hashlib.sha256(self.keyauthorization.encode("utf8")).hexdigest()
+		self.txt_value = _b64(hashlib.sha256(self.keyauthorization.encode("utf8")).digest())
 
 	def __enter__(self):
 		if self.zone_file:
