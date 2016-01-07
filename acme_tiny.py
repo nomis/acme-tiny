@@ -237,7 +237,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 			# Check all nameservers
 			success = False
 			failed = False
-			q = dns.message.make_query("_acme-challenge." + self.hostname + ".", "TXT")
+			q = dns.message.make_query(self.zone_name, "TXT")
 			q.flags &= ~dns.flags.RD
 			for ns in nameservers:
 				try:
