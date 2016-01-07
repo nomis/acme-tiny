@@ -208,10 +208,21 @@ class Dns01ChallengeHandler(ChallengeHandler):
 		while True:
 			try:
 				for hostname in [str(x) for x in dns.resolver.query(name, "NS")]:
-					for rdata in dns.resolver.query(hostname, "A"):
-						ns.add(str(rdata))
-					for rdata in dns.resolver.query(hostname, "AAAA"):
-						ns.add(str(rdata))
+					try:
+						for rdata in dns.resolver.query(hostname, "A"):
+							ns.add(str(rdata))
+					except dns.resolver.NXDOMAIN:
+						pass
+					except dns.resolver.NoAnswer:
+						pass
+
+					try:
+						for rdata in dns.resolver.query(hostname, "AAAA"):
+							ns.add(str(rdata))
+					except dns.resolver.NXDOMAIN:
+						pass
+					except dns.resolver.NoAnswer:
+						pass
 				break
 			except dns.resolver.NXDOMAIN:
 				name = name.parent()
