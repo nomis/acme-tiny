@@ -189,10 +189,10 @@ class Dns01ChallengeHandler(ChallengeHandler):
 
 		with open(self.zone_file, "r") as f:
 			for line in f:
-				if line.startswith(self.zone_name + " "):
-					content += self.zone_name + ' 1 TXT "' + self.txt_value + '"\n'
-				else:
+				if not line.startswith(self.zone_name + " "):
 					content += line
+
+		content += self.zone_name + ' 1 TXT "' + self.txt_value + '"\n'
 
 		with open(self.zone_file, "w") as f:
 			f.write(content)
