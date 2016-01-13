@@ -3,8 +3,8 @@ import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re,
 from urllib.request import urlopen
 from urllib.error import HTTPError
 
-DEFAULT_CA = "https://acme-staging.api.letsencrypt.org"
-#DEFAULT_CA = "https://acme-v01.api.letsencrypt.org"
+#DEFAULT_CA = "https://acme-staging.api.letsencrypt.org"
+DEFAULT_CA = "https://acme-v01.api.letsencrypt.org"
 
 LOGGER = logging.getLogger(__name__)
 LOGGER.addHandler(logging.StreamHandler())
