@@ -353,7 +353,8 @@ def cert(account_key, config_file, request_file, log=LOGGER, CA=DEFAULT_CA):
 
 	# return signed certificate!
 	log.info("Certificate signed!")
-	return """-----BEGIN CERTIFICATE-----\n{0}\n-----END CERTIFICATE-----\n""".format(
+	prefix = ("\n".join("Link: " + x for x in headers["Link"].split(", ")) + "\n") if "Link" in headers else ""
+	return prefix + """-----BEGIN CERTIFICATE-----\n{0}\n-----END CERTIFICATE-----\n""".format(
 		"\n".join(textwrap.wrap(base64.b64encode(result).decode("utf8"), 64)))
 
 def main(argv):
