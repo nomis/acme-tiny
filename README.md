@@ -1,6 +1,6 @@
 # acme-tiny
 
-Forked from [https://github.com/diafygi/acme-tiny](diafygi/acme-tiny).
+Forked from [diafygi/acme-tiny](https://github.com/diafygi/acme-tiny).
 
 ##Donate
 
