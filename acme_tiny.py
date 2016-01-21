@@ -61,7 +61,7 @@ def get_account_key(account_key, log=LOGGER, CA=DEFAULT_CA):
 	return {"header": header, "thumbprint": thumbprint, "filename": account_key, "CA": CA}
 
 def register(account_key, email, log=LOGGER, CA=DEFAULT_CA):
-	account_key = get_account_key(account_key, log)
+	account_key = get_account_key(account_key, log, CA)
 
 	log.info("Registering account...")
 	reg = {
