@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, configparser, dns.resolver, dns.name, dns.query, dns.message, dns.exception, dns.flags, dns.rdatatype
+import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, configparser
 from urllib.request import urlopen
 from urllib.error import HTTPError
 
@@ -216,6 +216,8 @@ class Dns01ChallengeHandler(ChallengeHandler):
 			self.log.info(subprocess.check_output(self.zone_cmd, shell=True).decode("utf8"))
 
 	def _find_ns(self):
+		import dns.resolver, dns.name
+
 		name = dns.name.from_text(self.zone_name)
 		ns = set()
 		while True:
@@ -245,6 +247,8 @@ class Dns01ChallengeHandler(ChallengeHandler):
 		return ns
 
 	def valid(self):
+		import dns.query, dns.message, dns.exception, dns.flags, dns.rdatatype
+
 		if not self.zone_file or not self.zone_cmd:
 			return False
 
