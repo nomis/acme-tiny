@@ -219,8 +219,6 @@ class Dns01ChallengeHandler(ChallengeHandler):
 		if self.zone_file:
 			self._update_zone_file()
 
-			self.reload()
-
 	def reload(self):
 		if self.zone_cmd:
 			self.log.info(subprocess.check_output(self.zone_cmd, shell=True).decode("utf8"))
