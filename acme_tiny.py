@@ -36,6 +36,9 @@ def _send_signed_request(account_key, url, payload):
 		return e.code, e.read(), e.headers
 
 def get_account_key(account_key, log=LOGGER, CA=DEFAULT_CA):
+	with open(account_key, "rb") as f:
+		pass
+
 	# parse account key to get public key
 	log.info("Parsing account key...")
 	proc = subprocess.Popen(["openssl", "rsa", "-in", account_key, "-noout", "-text"],
@@ -86,10 +89,17 @@ def register(account_key, email, log=LOGGER, CA=DEFAULT_CA):
 		raise ValueError("Error registering: {0} {1}".format(code, result))
 
 def req(config_file, private_key_file, log=LOGGER):
+	with open(config_file, "rb") as f:
+		pass
+	with open(private_key_file, "rb") as f:
+		pass
+
 	config = configparser.ConfigParser()
 	config.read(config_file)
 
 	hostnames = config.sections()
+	if not hostnames:
+		raise ValueError("No hostnames defined")
 
 	openssl_config = "[req]\ndistinguished_name=req_distinguished_name\n[req_distinguished_name]\n[SAN]\nsubjectAltName="
 	openssl_config = openssl_config + ",".join(["DNS:" + x for x in hostnames])
@@ -305,11 +315,19 @@ CHALLENGE_TYPES = {
 def cert(account_key, config_file, request_file, log=LOGGER, CA=DEFAULT_CA):
 	account_key = get_account_key(account_key, log, CA)
 
+	with open(config_file, "rb") as f:
+		pass
+
+	with open(request_file, "rb") as f:
+		pass
+
 	config = configparser.ConfigParser()
 	config.read(config_file)
 
 	hostnames = config.sections()
 	valid = 0
+	if not hostnames:
+		raise ValueError("No hostnames defined")
 
 	# verify each hostname
 	for hostname in hostnames:
