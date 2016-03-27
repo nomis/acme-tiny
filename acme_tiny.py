@@ -39,8 +39,7 @@ def get_account_key(account_key, log=LOGGER, CA=DEFAULT_CA):
 	with open(account_key, "rb") as f:
 		pass
 
-	# parse account key to get public key
-	log.info("Parsing account key...")
+	log.info("Reading account key...")
 	proc = subprocess.Popen(["openssl", "rsa", "-in", account_key, "-noout", "-text"],
 		stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	out, err = proc.communicate()
