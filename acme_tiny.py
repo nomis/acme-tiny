@@ -220,7 +220,9 @@ class Dns01ChallengeHandler(ChallengeHandler):
 
 	def reload(self):
 		if self.zone_cmd:
-			self.log.info(subprocess.check_output(self.zone_cmd, shell=True).decode("utf8"))
+			output = subprocess.check_output(self.zone_cmd, shell=True).decode("utf8")
+			if output:
+				self.log.info("Reload: " + output)
 
 	def _find_ns(self):
 		import dns.resolver, dns.name
