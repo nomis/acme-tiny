@@ -275,27 +275,27 @@ class Dns01ChallengeHandler(ChallengeHandler):
 			q = dns.message.make_query(self.zone_name, "TXT")
 			q.flags &= ~dns.flags.RD
 			for ns in nameservers:
+				log_message = "Query " + ns + " "
 				try:
-					self.log.info("Query " + ns + "...")
 					m = dns.query.udp(q, ns, timeout=5)
 					ok = False
 					for rrset in m.answer:
 						for rdata in rrset:
 							if rdata.rdtype == dns.rdatatype.TXT and rdata.strings[0] == self.txt_value:
-								self.log.info("  OK")
 								ok = True
 					if ok:
+						self.log.info(log_message + "OK")
 						success = True
 					else:
-						self.log.info("  No matching data")
+						self.log.info(log_message + "No data")
 						failed = True
 				except OSError:
 					# Ignore unreachable errors
-					self.log.info("  Error")
+					self.log.info(log_message + "Error")
 					pass
 				except dns.exception.Timeout:
 					# Ignore timeouts
-					self.log.info("  Timeout")
+					self.log.info(log_message + "Timeout")
 					pass
 
 			if success and not failed:
