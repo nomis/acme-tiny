@@ -256,12 +256,12 @@ class Dns01ChallengeHandler(ChallengeHandler):
 		return ns
 
 	def valid(self):
-		import dns.query, dns.message, dns.exception, dns.flags, dns.rdatatype
-
 		if not self.zone_file or not self.zone_cmd:
 			return False
 
 		self.reload()
+
+		import dns.query, dns.message, dns.exception, dns.flags, dns.rdatatype
 
 		# Get nameservers for hostname
 		nameservers = self._find_ns()
