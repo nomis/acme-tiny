@@ -231,7 +231,12 @@ class Dns01ChallengeHandler(ChallengeHandler):
 		ns = set()
 		while True:
 			try:
-				for hostname in [str(x) for x in dns.resolver.query(name, "NS")]:
+				resp = dns.resolver.query(name, "NS")
+				if resp.rrset.name != name:
+					name = name.parent()
+					continue
+
+				for hostname in [str(x) for x in resp]:
 					try:
 						for rdata in dns.resolver.query(hostname, "A"):
 							ns.add(str(rdata))
