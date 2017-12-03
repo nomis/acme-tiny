@@ -69,7 +69,7 @@ def register(account_key, email, log=LOGGER, CA=DEFAULT_CA):
 	reg = {
 		"resource": "new-reg",
 		"contact": ["mailto:" + x for x in [email]],
-		"agreement": "https://letsencrypt.org/documents/LE-SA-v1.0.1-July-27-2015.pdf",
+		"agreement": "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf",
 	}
 	code, result, headers = _send_signed_request(account_key, CA + "/acme/new-reg", reg)
 	if code == 201:
@@ -87,7 +87,7 @@ def register(account_key, email, log=LOGGER, CA=DEFAULT_CA):
 	else:
 		raise ValueError("Error registering: {0} {1}".format(code, result))
 
-def req(config_file, private_key_file, log=LOGGER):
+def req(config_file, private_key_file, selfsign, log=LOGGER):
 	with open(config_file, "rb") as f:
 		pass
 	with open(private_key_file, "rb") as f:
@@ -102,12 +102,17 @@ def req(config_file, private_key_file, log=LOGGER):
 
 	openssl_config = "[req]\ndistinguished_name=req_distinguished_name\n[req_distinguished_name]\n[SAN]\nsubjectAltName="
 	openssl_config = openssl_config + ",".join(["DNS:" + x for x in hostnames])
-	proc = subprocess.Popen(["openssl", "req", "-new", "-batch", "-nodes", "-key", private_key_file,
-		"-subj", "/CN=" + hostnames[0], "-sha512", "-reqexts", "SAN", "-outform", "PEM", "-config", "/dev/stdin"],
-		stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	cmd = ["openssl", "req", "-new", "-batch", "-nodes", "-key", private_key_file,
+		"-subj", "/CN=" + hostnames[0], "-sha512", "-reqexts", "SAN", "-outform", "PEM", "-config", "/dev/stdin"]
+
+	if selfsign:
+		cmd.extend(["-x509", "-days", str(365.25 * 200)])
+
+	proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	csr_pem, err = proc.communicate(input=openssl_config.encode("utf8"))
 	if err:
-		raise ValueError("Error creating certificate request:\n{0}".format(err.decode("utf8")))
+		raise ValueError("Error creating {1}:\n{0}".format(err.decode("utf8"),
+			"self signed certificate" if selfsign else "certificate request"))
 
 	return csr_pem.decode("utf8")
 
@@ -397,6 +402,10 @@ def main(argv):
 	parser_req.add_argument("--config", required=True, help="path to your certificate configuration file")
 	parser_req.add_argument("--private-key", required=True, help="path to your private key")
 
+	parser_selfsign = subparsers.add_parser("selfsign")
+	parser_selfsign.add_argument("--config", required=True, help="path to your certificate configuration file")
+	parser_selfsign.add_argument("--private-key", required=True, help="path to your private key")
+
 	parser_cert = subparsers.add_parser("cert")
 	parser_cert.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
 	parser_cert.add_argument("--config", required=True, help="path to your certificate configuration file")
@@ -407,8 +416,11 @@ def main(argv):
 	if args.subparser_name == "register":
 		register(args.account_key, args.email, log=LOGGER, CA=args.ca)
 	elif args.subparser_name == "req":
-		signed_req = req(args.config, args.private_key, log=LOGGER)
+		signed_req = req(args.config, args.private_key, False, log=LOGGER)
 		sys.stdout.write(signed_req)
+	elif args.subparser_name == "selfsign":
+		selfsigned_crt = req(args.config, args.private_key, True, log=LOGGER)
+		sys.stdout.write(selfsigned_crt)
 	elif args.subparser_name == "cert":
 		signed_crt = cert(args.account_key, args.config, args.req, log=LOGGER, CA=args.ca)
 		sys.stdout.write(signed_crt)
