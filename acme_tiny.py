@@ -69,7 +69,7 @@ def register(account_key, email, log=LOGGER, CA=DEFAULT_CA):
 	reg = {
 		"resource": "new-reg",
 		"contact": ["mailto:" + x for x in [email]],
-		"agreement": "https://letsencrypt.org/documents/LE-SA-v1.1.1-August-1-2016.pdf",
+		"agreement": "https://letsencrypt.org/documents/LE-SA-v1.2-November-15-2017.pdf",
 	}
 	code, result, headers = _send_signed_request(account_key, CA + "/acme/new-reg", reg)
 	if code == 201:
