@@ -412,7 +412,6 @@ def revoke(account_key, cert, reason, log=LOGGER, CA=DEFAULT_CA):
 		"reason": reason,
 	})
 	if code == 200:
-		account = json.loads(result.decode("utf8"))
 		log.info("Revoked certificate")
 	else:
 		raise ValueError("Error revoking certificate: {0} {1}".format(code, result))
