@@ -388,6 +388,35 @@ def cert(account_key, config_file, request_file, log=LOGGER, CA=DEFAULT_CA):
 	return prefix + """-----BEGIN CERTIFICATE-----\n{0}\n-----END CERTIFICATE-----\n""".format(
 		"\n".join(textwrap.wrap(base64.b64encode(result).decode("utf8"), 64)))
 
+def revoke(account_key, cert, reason, log=LOGGER, CA=DEFAULT_CA):
+	account_key = get_account_key(account_key, log, CA)
+
+	with open(cert, "r") as f:
+		data = ""
+		in_cert = False
+
+		for line in f:
+			if line.startswith("-----"):
+				in_cert = not in_cert
+				if not in_cert:
+					break
+			elif in_cert:
+				data += line
+
+		data = base64.b64decode(data)
+
+	log.info("Revoking certificate...")
+	code, result, headers = _send_signed_request(account_key, CA + "/acme/revoke-cert", {
+		"resource": "revoke-cert",
+		"certificate": _b64(data),
+		"reason": reason,
+	})
+	if code == 200:
+		account = json.loads(result.decode("utf8"))
+		log.info("Revoked certificate")
+	else:
+		raise ValueError("Error revoking certificate: {0} {1}".format(code, result))
+
 def main(argv):
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--quiet", action="store_const", const=logging.ERROR, help="suppress output except for errors")
@@ -411,6 +440,11 @@ def main(argv):
 	parser_cert.add_argument("--config", required=True, help="path to your certificate configuration file")
 	parser_cert.add_argument("--req", required=True, help="path to your certificate request")
 
+	parser_revoke = subparsers.add_parser("revoke")
+	parser_revoke.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
+	parser_revoke.add_argument("--cert", required=True, help="path to your certificate")
+	parser_revoke.add_argument("--reason", required=True, type=int, help="reason code")
+
 	args = parser.parse_args(argv)
 	LOGGER.setLevel(args.quiet or LOGGER.level)
 	if args.subparser_name == "register":
@@ -424,6 +458,8 @@ def main(argv):
 	elif args.subparser_name == "cert":
 		signed_crt = cert(args.account_key, args.config, args.req, log=LOGGER, CA=args.ca)
 		sys.stdout.write(signed_crt)
+	elif args.subparser_name == "revoke":
+		revoke(args.account_key, args.cert, args.reason, log=LOGGER, CA=args.ca)
 
 if __name__ == "__main__":
 	main(sys.argv[1:])
