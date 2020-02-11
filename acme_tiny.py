@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, configparser
-from urllib.request import urlopen
+from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
-#DEFAULT_CA = "https://acme-staging.api.letsencrypt.org"
-DEFAULT_CA = "https://acme-v01.api.letsencrypt.org"
+DEFAULT_CA = "https://acme-v02.api.letsencrypt.org"
+#DEFAULT_CA = "https://acme-staging-v02.api.letsencrypt.org"
 
 LOGGER = logging.getLogger(__name__)
 LOGGER.addHandler(logging.StreamHandler())
@@ -14,11 +14,31 @@ LOGGER.setLevel(logging.INFO)
 def _b64(b):
 	return base64.urlsafe_b64encode(b).decode("utf8").replace("=", "")
 
+# helper function - make request and automatically parse json response
+def _do_request(url, data=None, err_msg="Error", depth=0):
+	try:
+		resp = urlopen(Request(url, data=data, headers={"Content-Type": "application/jose+json", "User-Agent": "nomis/acme-tiny"}))
+		resp_data, code, headers = resp.read().decode("utf8"), resp.getcode(), resp.headers
+	except IOError as e:
+		resp_data = e.read().decode("utf8") if hasattr(e, "read") else str(e)
+		code, headers = getattr(e, "code", None), {}
+	try:
+		if resp_data:
+			resp_data = json.loads(resp_data) # try to parse json results
+	except ValueError:
+		pass
+	if depth < 100 and code == 400 and resp_data['type'] == "urn:ietf:params:acme:error:badNonce":
+		raise IndexError(resp_data) # allow 100 retrys for bad nonces
+	if code not in [200, 201, 204]:
+		raise ValueError("{0}:\nURL: {1}\nData: {2}\nResponse Code: {3}\nResponse: {4}".format(err_msg, url, data, code, resp_data))
+	return code, resp_data, headers
+
 # helper function make signed requests
-def _send_signed_request(account_key, url, payload):
-	payload64 = _b64(json.dumps(payload).encode("utf8"))
+def _send_signed_request(account_key, directory, url, payload, err_msg, depth=0):
+	payload64 = "" if payload is None else _b64(json.dumps(payload).encode("utf8"))
 	protected = copy.deepcopy(account_key["header"])
-	protected["nonce"] = urlopen(account_key["CA"] + "/directory").headers["Replay-Nonce"]
+	protected["url"] = url
+	protected["nonce"] = _do_request(directory["newNonce"])[2]["Replay-Nonce"]
 	protected64 = _b64(json.dumps(protected).encode("utf8"))
 	proc = subprocess.Popen(["openssl", "dgst", "-sha256", "-sign", account_key["filename"]],
 		stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -26,16 +46,17 @@ def _send_signed_request(account_key, url, payload):
 	if proc.returncode != 0:
 		raise IOError("OpenSSL Error: {0}".format(err))
 	data = json.dumps({
-		"header": account_key["header"], "protected": protected64,
+		"protected": protected64,
 		"payload": payload64, "signature": _b64(out),
 	})
 	try:
-		resp = urlopen(url, data.encode("utf8"))
-		return resp.getcode(), resp.read(), resp.headers
+		return _do_request(url, data.encode("utf8"), err_msg=err_msg, depth=depth)
+	except IndexError: # retry bad nonces (they raise IndexError)
+		return _send_signed_request(account_key, directory, url, payload, err_msg, depth=(depth + 1))
 	except HTTPError as e:
 		return e.code, e.read(), e.headers
 
-def get_account_key(account_key, log=LOGGER, CA=DEFAULT_CA):
+def get_account_key(account_key, log):
 	with open(account_key, "rb") as f:
 		pass
 
@@ -60,32 +81,31 @@ def get_account_key(account_key, log=LOGGER, CA=DEFAULT_CA):
 	}
 	accountkey_json = json.dumps(header["jwk"], sort_keys=True, separators=(",", ":"))
 	thumbprint = _b64(hashlib.sha256(accountkey_json.encode("utf8")).digest())
-	return {"header": header, "thumbprint": thumbprint, "filename": account_key, "CA": CA}
+	return {"header": header, "thumbprint": thumbprint, "filename": account_key}
 
-def register(account_key, email, log=LOGGER, CA=DEFAULT_CA):
-	account_key = get_account_key(account_key, log, CA)
+def register(account_key, email, log, directory):
+	if type(account_key) != dict:
+		account_key = get_account_key(account_key, log)
 
 	log.info("Registering account...")
-	reg = {
-		"resource": "new-reg",
-		"contact": ["mailto:" + x for x in [email]],
-		"agreement": "https://letsencrypt.org/documents/LE-SA-v1.2-November-15-2017.pdf",
-	}
-	code, result, headers = _send_signed_request(account_key, CA + "/acme/new-reg", reg)
+	reg = { "termsOfServiceAgreed": True }
+	if email:
+		reg["contact"] = ["mailto:" + x for x in [email]]
+	code, result, headers = _send_signed_request(account_key, directory, directory["newAccount"], reg, "Error registering")
+
+	account_key["header"]["kid"] = headers["Location"]
+	del account_key["header"]["jwk"]
+
 	if code == 201:
-		account = json.loads(result.decode("utf8"))
-		log.info("Registered account " + str(account["id"]) + " " + str(account["createdAt"]))
-	elif code == 409:
-		log.info("Already registered")
-		reg["resource"] = "reg"
-		code, result, headers = _send_signed_request(account_key, headers["Location"], reg)
-		if code == 202:
-			account = json.loads(result.decode("utf8"))
-			log.info("Updated account " + str(account["id"]) + " " + str(account["createdAt"]))
+		log.info("Registered account " + str(result["createdAt"]))
+	elif email:
+		log.info("Already registered " + str(result["createdAt"]))
+		reg = { "contact": ["mailto:" + x for x in [email]] }
+		code, result, headers = _send_signed_request(account_key, directory, headers["Location"], reg, "Error updating contact details")
+		if code == 200:
+			log.info("Updated account " + str(result["createdAt"]))
 		else:
 			raise ValueError("Error updating registration: {0} {1}".format(code, result))
-	else:
-		raise ValueError("Error registering: {0} {1}".format(code, result))
 
 def req(config_file, private_key_file, selfsign, log=LOGGER):
 	with open(config_file, "rb") as f:
@@ -117,38 +137,32 @@ def req(config_file, private_key_file, selfsign, log=LOGGER):
 	return csr_pem.decode("utf8")
 
 class ChallengeHandler:
-	def __init__(self, hostname, data, account_key, log):
+	def __init__(self, hostname, data, account_key, directory, log):
 		self.account_key = account_key
+		self.directory = directory
 		self.log = log
 		self.hostname = hostname
 		self.type = data["type"]
-		self.uri = data["uri"]
+		self.url = data["url"]
 		self.token = re.sub(r"[^A-Za-z0-9_\-]", "_", data["token"])
 		self.keyauthorization = "{0}.{1}".format(self.token, account_key["thumbprint"])
 
 	def valid(self):
 		# notify challenge are met
-		code, result, headers = _send_signed_request(self.account_key, self.uri, {
-			"resource": "challenge",
+		_, result, _ = _send_signed_request(self.account_key, self.directory, self.url, {
 			"keyAuthorization": self.keyauthorization,
-		})
-		if code != 202:
-			raise ValueError("Error triggering challenge: {0} {1}".format(code, result))
+		}, "Error triggering challenge")
 		# wait for challenge to be verified
 		attempts = 10
 		while attempts > 0:
 			attempts = attempts - 1
-			try:
-				resp = urlopen(self.uri)
-				challenge_status = json.loads(resp.read().decode("utf8"))
-			except IOError as e:
-				raise ValueError("Error checking challenge: {0} {1}".format(
-					e.code, json.loads(e.read().decode("utf8"))))
+			_, challenge_status, _ = _send_signed_request(self.account_key, self.directory,
+				self.url, None, "Error checking challenge")
 
 			if challenge_status["status"] == "pending":
 				time.sleep(2)
 			elif challenge_status["status"] == "valid":
-				self.log.info("{0} verified!".format(self.hostname))
+				self.log.info("{0} verified".format(self.hostname))
 				return True
 			else:
 				raise ValueError("{0} challenge did not pass: {1}".format(
@@ -156,8 +170,8 @@ class ChallengeHandler:
 		return False
 
 class Http01ChallengeHandler(ChallengeHandler):
-	def __init__(self, hostname, data, account_key, config, log):
-		super().__init__(hostname, data, account_key, log)
+	def __init__(self, hostname, data, account_key, directory, config, log):
+		super().__init__(hostname, data, account_key, directory, log)
 		path = config.get("http-01_dir")
 		self.wellknown_path = os.path.join(path, self.token) if path else None
 
@@ -189,8 +203,8 @@ class Http01ChallengeHandler(ChallengeHandler):
 		return super().valid()
 
 class Dns01ChallengeHandler(ChallengeHandler):
-	def __init__(self, hostname, data, account_key, config, log):
-		super().__init__(hostname, data, account_key, log)
+	def __init__(self, hostname, data, account_key, directory, config, log):
+		super().__init__(hostname, data, account_key, directory, log)
 		self.zone_file = config.get("dns-01_file")
 		self.zone_name = config.get("dns-01_name")
 		self.zone_cmd = config.get("dns-01_cmd")
@@ -321,8 +335,8 @@ CHALLENGE_TYPES = {
 	"dns-01": Dns01ChallengeHandler,
 }
 
-def cert(account_key, config_file, request_file, log=LOGGER, CA=DEFAULT_CA):
-	account_key = get_account_key(account_key, log, CA)
+def cert(account_key, config_file, request_file, log, directory):
+	account_key = get_account_key(account_key, log)
 
 	with open(config_file, "rb") as f:
 		pass
@@ -338,24 +352,26 @@ def cert(account_key, config_file, request_file, log=LOGGER, CA=DEFAULT_CA):
 	if not hostnames:
 		raise ValueError("No hostnames defined")
 
+	register(account_key, None, log, directory)
+
+	# create a new order
+	code, order, order_headers = _send_signed_request(account_key, directory, directory['newOrder'], {
+		"identifiers": [{"type": "dns", "value": hostname} for hostname in hostnames]
+	}, "Error creating order")
+
 	# verify each hostname
-	for hostname in hostnames:
+	for auth_url in order["authorizations"]:
+		_, authorisation, _ = _send_signed_request(account_key, directory, auth_url, None, "Error getting challenges")
+		hostname = authorisation["identifier"]["value"]
+		if hostname not in hostnames:
+			raise ValueError("Asked to verify {0} which was not requested".format(hostname))
+
 		log.info("Verifying {0}...".format(hostname))
 
-		# get new challenge
-		code, result, headers = _send_signed_request(account_key, CA + "/acme/new-authz", {
-			"resource": "new-authz",
-			"identifier": {"type": "dns", "value": hostname},
-		})
-		if code != 201:
-			raise ValueError("Error requesting challenges: {0} {1}".format(code, result))
-
-		# make the challenge file
-		challenges = json.loads(result.decode("utf8"))["challenges"]
 		ok = False
-		for challenge in challenges:
+		for challenge in authorisation["challenges"]:
 			if challenge["type"] in CHALLENGE_TYPES:
-				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, account_key, config[hostname], log) as c:
+				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, account_key, directory, config[hostname], log) as c:
 					if c.valid():
 						valid += 1
 						ok = True
@@ -364,8 +380,8 @@ def cert(account_key, config_file, request_file, log=LOGGER, CA=DEFAULT_CA):
 		if not ok:
 			raise ValueError("No valid challenge types for {0}".format(hostname))
 
-	if valid != len(hostnames):
-		raise ValueError("Unable to validate all hostnames ({0} < {1})".format(valid, len(hostnames)))
+	if valid != len(order["authorizations"]):
+		raise ValueError("Unable to complete all authorisations ({0} < {1})".format(valid, len(order["authorizations"])))
 
 	# get the new certificate
 	log.info("Signing certificate...")
@@ -373,23 +389,35 @@ def cert(account_key, config_file, request_file, log=LOGGER, CA=DEFAULT_CA):
 		stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	csr_der, err = proc.communicate()
 	if err:
-		raise ValueError("Error creating certificate request:\n{0}".format(err.decode("utf8")))
+		raise ValueError("Error reading certificate request:\n{0}".format(err.decode("utf8")))
 
-	code, result, headers = _send_signed_request(account_key, CA + "/acme/new-cert", {
-		"resource": "new-cert",
-		"csr": _b64(csr_der),
-	})
-	if code != 201:
-		raise ValueError("Error signing certificate: {0} {1}".format(code, result))
+	# finalize the order with the csr
+	_send_signed_request(account_key, directory, order["finalize"], { "csr": _b64(csr_der) }, "Error finalising order")
 
-	# return signed certificate!
-	log.info("Certificate signed!")
-	prefix = ("\n".join("Link: " + x for x in headers["Link"].split(", ")) + "\n") if "Link" in headers else ""
-	return prefix + """-----BEGIN CERTIFICATE-----\n{0}\n-----END CERTIFICATE-----\n""".format(
-		"\n".join(textwrap.wrap(base64.b64encode(result).decode("utf8"), 64)))
+	# wait for certificate to be issued
+	attempts = 10
+	ok = False
+	while attempts > 0:
+		attempts = attempts - 1
+		_, order, _ = _send_signed_request(account_key, directory,
+			order_headers["Location"], None, "Error checking challenge")
 
-def revoke(account_key, cert, reason, log=LOGGER, CA=DEFAULT_CA):
-	account_key = get_account_key(account_key, log, CA)
+		if order["status"] in ["pending", "processing"]:
+			time.sleep(2)
+		elif order["status"] == "valid":
+			log.info("Certificate ready")
+			ok = True
+			break
+		else:
+			raise ValueError("Certificate was not issued: {0}".format(order))
+
+	# return signed certificate
+	_, result, _ = _send_signed_request(account_key, directory, order["certificate"], None, "Certificate download failed")
+	log.info("Certificate signed")
+	return result
+
+def revoke(account_key, cert, reason, log, directory):
+	account_key = get_account_key(account_key, log)
 
 	with open(cert, "r") as f:
 		data = ""
@@ -405,16 +433,14 @@ def revoke(account_key, cert, reason, log=LOGGER, CA=DEFAULT_CA):
 
 		data = base64.b64decode(data)
 
+	register(account_key, None, log, directory)
+
 	log.info("Revoking certificate...")
-	code, result, headers = _send_signed_request(account_key, CA + "/acme/revoke-cert", {
-		"resource": "revoke-cert",
+	_send_signed_request(account_key, directory, directory["revokeCert"], {
 		"certificate": _b64(data),
 		"reason": reason,
-	})
-	if code == 200:
-		log.info("Revoked certificate")
-	else:
-		raise ValueError("Error revoking certificate: {0} {1}".format(code, result))
+	}, "Error revoking certificate")
+	log.info("Revoked certificate")
 
 def main(argv):
 	parser = argparse.ArgumentParser()
@@ -446,8 +472,11 @@ def main(argv):
 
 	args = parser.parse_args(argv)
 	LOGGER.setLevel(args.quiet or LOGGER.level)
+
+	_, directory, _ = _do_request(args.ca + "/directory", err_msg="Error getting directory")
+
 	if args.subparser_name == "register":
-		register(args.account_key, args.email, log=LOGGER, CA=args.ca)
+		register(args.account_key, args.email, log=LOGGER, directory=directory)
 	elif args.subparser_name == "req":
 		signed_req = req(args.config, args.private_key, False, log=LOGGER)
 		sys.stdout.write(signed_req)
@@ -455,10 +484,10 @@ def main(argv):
 		selfsigned_crt = req(args.config, args.private_key, True, log=LOGGER)
 		sys.stdout.write(selfsigned_crt)
 	elif args.subparser_name == "cert":
-		signed_crt = cert(args.account_key, args.config, args.req, log=LOGGER, CA=args.ca)
+		signed_crt = cert(args.account_key, args.config, args.req, log=LOGGER, directory=directory)
 		sys.stdout.write(signed_crt)
 	elif args.subparser_name == "revoke":
-		revoke(args.account_key, args.cert, args.reason, log=LOGGER, CA=args.ca)
+		revoke(args.account_key, args.cert, args.reason, log=LOGGER, directory=directory)
 
 if __name__ == "__main__":
 	main(sys.argv[1:])
