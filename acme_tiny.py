@@ -24,18 +24,16 @@ import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re,
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
-DEFAULT_CA = "https://acme-v02.api.letsencrypt.org"
-#DEFAULT_CA = "https://acme-staging-v02.api.letsencrypt.org"
+DEFAULT_DIRECTORY = "https://acme-v02.api.letsencrypt.org/directory"
+#DEFAULT_DIRECTORY = "https://acme-staging-v02.api.letsencrypt.org/directory"
 
-LOGGER = logging.getLogger(__name__)
-LOGGER.addHandler(logging.StreamHandler())
-LOGGER.setLevel(logging.INFO)
+log = logging.getLogger(__name__)
+log.addHandler(logging.StreamHandler())
+log.setLevel(logging.INFO)
 
-# helper function base64 encode for jose spec
 def _b64(b):
 	return base64.urlsafe_b64encode(b).decode("utf8").replace("=", "")
 
-# helper function - make request and automatically parse json response
 def _do_request(url, data=None, err_msg="Error", depth=0):
 	try:
 		resp = urlopen(Request(url, data=data, headers={"Content-Type": "application/jose+json", "User-Agent": "nomis/acme-tiny"}))
@@ -49,86 +47,92 @@ def _do_request(url, data=None, err_msg="Error", depth=0):
 	except ValueError:
 		pass
 	if depth < 100 and code == 400 and resp_data['type'] == "urn:ietf:params:acme:error:badNonce":
-		raise IndexError(resp_data) # allow 100 retrys for bad nonces
+		raise IndexError(resp_data) # allow 100 retries for bad nonces
 	if code not in [200, 201, 204]:
 		raise ValueError("{0}:\nURL: {1}\nData: {2}\nResponse Code: {3}\nResponse: {4}".format(err_msg, url, data, code, resp_data))
 	return code, resp_data, headers
 
-# helper function make signed requests
-def _send_signed_request(account_key, directory, url, payload, err_msg, depth=0):
-	payload64 = "" if payload is None else _b64(json.dumps(payload).encode("utf8"))
-	protected = copy.deepcopy(account_key["header"])
-	protected["url"] = url
-	protected["nonce"] = _do_request(directory["newNonce"])[2]["Replay-Nonce"]
-	protected64 = _b64(json.dumps(protected).encode("utf8"))
-	proc = subprocess.Popen(["openssl", "dgst", "-sha256", "-sign", account_key["filename"]],
-		stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-	out, err = proc.communicate("{0}.{1}".format(protected64, payload64).encode("utf8"))
-	if proc.returncode != 0:
-		raise IOError("OpenSSL Error: {0}".format(err))
-	data = json.dumps({
-		"protected": protected64,
-		"payload": payload64, "signature": _b64(out),
-	})
-	try:
-		return _do_request(url, data.encode("utf8"), err_msg=err_msg, depth=depth)
-	except IndexError: # retry bad nonces (they raise IndexError)
-		return _send_signed_request(account_key, directory, url, payload, err_msg, depth=(depth + 1))
-	except HTTPError as e:
-		return e.code, e.read(), e.headers
+class AccountSession:
+	def __init__(self, account_key, directory_url):
+		self.account_key = account_key
+		self.directory_url = directory_url
+		self.kid = None
 
-def get_account_key(account_key, log):
-	with open(account_key, "rb") as f:
-		pass
+		with open(self.account_key, "rb") as f:
+			pass
 
-	log.info("Reading account key...")
-	proc = subprocess.Popen(["openssl", "rsa", "-in", account_key, "-noout", "-text"],
-		stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-	out, err = proc.communicate()
-	if proc.returncode != 0:
-		raise IOError("OpenSSL Error: {0}".format(err))
-	pub_hex, pub_exp = re.search(
-		r"modulus:\n\s+00:([a-f0-9\:\s]+?)\npublicExponent: ([0-9]+)",
-		out.decode("utf8"), re.MULTILINE|re.DOTALL).groups()
-	pub_exp = "{0:x}".format(int(pub_exp))
-	pub_exp = "0{0}".format(pub_exp) if len(pub_exp) % 2 else pub_exp
-	header = {
-		"alg": "RS256",
-		"jwk": {
+		log.info("Reading account key...")
+		proc = subprocess.Popen(["openssl", "rsa", "-in", self.account_key, "-noout", "-text"],
+			stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		out, err = proc.communicate()
+		if proc.returncode != 0:
+			raise IOError("OpenSSL Error: {0}".format(err))
+		pub_hex, pub_exp = re.search(
+			r"modulus:\n\s+00:([a-f0-9\:\s]+?)\npublicExponent: ([0-9]+)",
+			out.decode("utf8"), re.MULTILINE|re.DOTALL).groups()
+		pub_exp = "{0:x}".format(int(pub_exp))
+		pub_exp = "0{0}".format(pub_exp) if len(pub_exp) % 2 else pub_exp
+		self.alg = "RS256"
+		self.jwk = {
 			"e": _b64(binascii.unhexlify(pub_exp)),
 			"kty": "RSA",
 			"n": _b64(binascii.unhexlify(re.sub(r"(\s|:)", "", pub_hex))),
-		},
-	}
-	accountkey_json = json.dumps(header["jwk"], sort_keys=True, separators=(",", ":"))
-	thumbprint = _b64(hashlib.sha256(accountkey_json.encode("utf8")).digest())
-	return {"header": header, "thumbprint": thumbprint, "filename": account_key}
+		}
+		accountkey_json = json.dumps(self.jwk, sort_keys=True, separators=(",", ":"))
+		self.thumbprint = _b64(hashlib.sha256(accountkey_json.encode("utf8")).digest())
 
-def register(account_key, email, log, directory):
-	if type(account_key) != dict:
-		account_key = get_account_key(account_key, log)
+	def header(self):
+		if self.kid:
+			return { "alg": self.alg, "kid": self.kid }
+		else:
+			return { "alg": self.alg, "jwk": self.jwk }
 
-	log.info("Registering account...")
-	reg = { "termsOfServiceAgreed": True }
+	def start(self):
+		log.info("Getting directory...")
+		_, self.directory, _ = _do_request(self.directory_url, err_msg="Error getting directory")
+
+		log.info("Registering account...")
+		reg = { "termsOfServiceAgreed": True }
+		code, result, headers = self.request(self.directory["newAccount"], reg, "Error registering")
+
+		self.kid = headers["Location"]
+		if code == 201:
+			log.info("Registered account " + str(result["createdAt"]))
+
+	def request(self, url, payload, err_msg, depth=0):
+		payload64 = "" if payload is None else _b64(json.dumps(payload).encode("utf8"))
+		protected = self.header()
+		protected["url"] = url
+		protected["nonce"] = _do_request(self.directory["newNonce"])[2]["Replay-Nonce"]
+		protected64 = _b64(json.dumps(protected).encode("utf8"))
+		proc = subprocess.Popen(["openssl", "dgst", "-sha256", "-sign", self.account_key],
+			stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		out, err = proc.communicate("{0}.{1}".format(protected64, payload64).encode("utf8"))
+		if proc.returncode != 0:
+			raise IOError("OpenSSL Error: {0}".format(err))
+		data = json.dumps({
+			"protected": protected64,
+			"payload": payload64, "signature": _b64(out),
+		})
+		try:
+			return _do_request(url, data.encode("utf8"), err_msg=err_msg, depth=depth)
+		except IndexError: # retry bad nonces (they raise IndexError)
+			return self.request(url, payload, err_msg, depth=(depth + 1))
+		except HTTPError as e:
+			return e.code, e.read(), e.headers
+
+def register(session, email):
+	session.start()
+
 	if email:
-		reg["contact"] = ["mailto:" + x for x in [email]]
-	code, result, headers = _send_signed_request(account_key, directory, directory["newAccount"], reg, "Error registering")
-
-	account_key["header"]["kid"] = headers["Location"]
-	del account_key["header"]["jwk"]
-
-	if code == 201:
-		log.info("Registered account " + str(result["createdAt"]))
-	elif email:
-		log.info("Already registered " + str(result["createdAt"]))
 		reg = { "contact": ["mailto:" + x for x in [email]] }
-		code, result, headers = _send_signed_request(account_key, directory, headers["Location"], reg, "Error updating contact details")
+		code, result, _ = session.request(session.kid, reg, "Error updating contact details")
 		if code == 200:
 			log.info("Updated account " + str(result["createdAt"]))
 		else:
 			raise ValueError("Error updating registration: {0} {1}".format(code, result))
 
-def req(config_file, private_key_file, selfsign, log=LOGGER):
+def req(config_file, private_key_file, selfsign):
 	with open(config_file, "rb") as f:
 		pass
 	with open(private_key_file, "rb") as f:
@@ -147,7 +151,7 @@ def req(config_file, private_key_file, selfsign, log=LOGGER):
 		"-subj", "/CN=" + hostnames[0], "-sha512", "-reqexts", "SAN", "-outform", "PEM", "-config", "/dev/stdin"]
 
 	if selfsign:
-		cmd.extend(["-x509", "-days", str(365.25 * 200)])
+		cmd.extend(["-x509", "-days", str(int(365.25 * 200))])
 
 	proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 	csr_pem, err = proc.communicate(input=openssl_config.encode("utf8"))
@@ -158,32 +162,29 @@ def req(config_file, private_key_file, selfsign, log=LOGGER):
 	return csr_pem.decode("utf8")
 
 class ChallengeHandler:
-	def __init__(self, hostname, data, account_key, directory, log):
-		self.account_key = account_key
-		self.directory = directory
-		self.log = log
+	def __init__(self, hostname, data, session):
+		self.session = session
 		self.hostname = hostname
 		self.type = data["type"]
 		self.url = data["url"]
 		self.token = re.sub(r"[^A-Za-z0-9_\-]", "_", data["token"])
-		self.keyauthorization = "{0}.{1}".format(self.token, account_key["thumbprint"])
+		self.keyauthorization = "{0}.{1}".format(self.token, self.session.thumbprint)
 
 	def valid(self):
 		# notify challenge are met
-		_, result, _ = _send_signed_request(self.account_key, self.directory, self.url, {
+		_, result, _ = self.session.request(self.url, {
 			"keyAuthorization": self.keyauthorization,
 		}, "Error triggering challenge")
 		# wait for challenge to be verified
 		attempts = 10
 		while attempts > 0:
 			attempts = attempts - 1
-			_, challenge_status, _ = _send_signed_request(self.account_key, self.directory,
-				self.url, None, "Error checking challenge")
+			_, challenge_status, _ = self.session.request(self.url, None, "Error checking challenge")
 
 			if challenge_status["status"] == "pending":
 				time.sleep(2)
 			elif challenge_status["status"] == "valid":
-				self.log.info("{0} verified".format(self.hostname))
+				log.info("{0} verified".format(self.hostname))
 				return True
 			else:
 				raise ValueError("{0} challenge did not pass: {1}".format(
@@ -191,8 +192,8 @@ class ChallengeHandler:
 		return False
 
 class Http01ChallengeHandler(ChallengeHandler):
-	def __init__(self, hostname, data, account_key, directory, config, log):
-		super().__init__(hostname, data, account_key, directory, log)
+	def __init__(self, hostname, data, session, config):
+		super().__init__(hostname, data, session)
 		path = config.get("http-01_dir")
 		self.wellknown_path = os.path.join(path, self.token) if path else None
 
@@ -224,8 +225,8 @@ class Http01ChallengeHandler(ChallengeHandler):
 		return super().valid()
 
 class Dns01ChallengeHandler(ChallengeHandler):
-	def __init__(self, hostname, data, account_key, directory, config, log):
-		super().__init__(hostname, data, account_key, directory, log)
+	def __init__(self, hostname, data, session, config):
+		super().__init__(hostname, data, session)
 		self.zone_file = config.get("dns-01_file")
 		self.zone_name = config.get("dns-01_name")
 		self.zone_cmd = config.get("dns-01_cmd")
@@ -262,7 +263,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 		if self.zone_cmd:
 			output = subprocess.check_output(self.zone_cmd, shell=True).decode("utf8")
 			if output:
-				self.log.info("Reload: " + output)
+				log.info("Reload: " + output)
 
 	def _find_ns(self):
 		import dns.resolver, dns.name
@@ -331,23 +332,23 @@ class Dns01ChallengeHandler(ChallengeHandler):
 							if rdata.rdtype == dns.rdatatype.TXT and rdata.strings[0] == self.txt_value:
 								ok = True
 					if ok:
-						self.log.info(log_message + "OK")
+						log.info(log_message + "OK")
 						success = True
 					else:
-						self.log.info(log_message + "No data")
+						log.info(log_message + "No data")
 						failed = True
 				except OSError:
 					# Ignore unreachable errors
-					self.log.info(log_message + "Error")
+					log.info(log_message + "Error")
 					pass
 				except dns.exception.Timeout:
 					# Ignore timeouts
-					self.log.info(log_message + "Timeout")
+					log.info(log_message + "Timeout")
 					pass
 
 			if success and not failed:
 				return super().valid()
-			self.log.info("Retrying")
+			log.info("Retrying")
 
 		return False
 
@@ -356,9 +357,7 @@ CHALLENGE_TYPES = {
 	"dns-01": Dns01ChallengeHandler,
 }
 
-def cert(account_key, config_file, request_file, log, directory):
-	account_key = get_account_key(account_key, log)
-
+def cert(session, config_file, request_file):
 	with open(config_file, "rb") as f:
 		pass
 
@@ -368,21 +367,21 @@ def cert(account_key, config_file, request_file, log, directory):
 	config = configparser.ConfigParser()
 	config.read(config_file)
 
+	session.start()
+
 	hostnames = config.sections()
 	valid = 0
 	if not hostnames:
 		raise ValueError("No hostnames defined")
 
-	register(account_key, None, log, directory)
-
 	# create a new order
-	code, order, order_headers = _send_signed_request(account_key, directory, directory['newOrder'], {
+	code, order, order_headers = session.request(session.directory["newOrder"], {
 		"identifiers": [{"type": "dns", "value": hostname} for hostname in hostnames]
 	}, "Error creating order")
 
 	# verify each hostname
 	for auth_url in order["authorizations"]:
-		_, authorisation, _ = _send_signed_request(account_key, directory, auth_url, None, "Error getting challenges")
+		_, authorisation, _ = session.request(auth_url, None, "Error getting challenges")
 		hostname = authorisation["identifier"]["value"]
 		if hostname not in hostnames:
 			raise ValueError("Asked to verify {0} which was not requested".format(hostname))
@@ -392,7 +391,7 @@ def cert(account_key, config_file, request_file, log, directory):
 		ok = False
 		for challenge in authorisation["challenges"]:
 			if challenge["type"] in CHALLENGE_TYPES:
-				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, account_key, directory, config[hostname], log) as c:
+				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, session, config[hostname]) as c:
 					if c.valid():
 						valid += 1
 						ok = True
@@ -413,15 +412,14 @@ def cert(account_key, config_file, request_file, log, directory):
 		raise ValueError("Error reading certificate request:\n{0}".format(err.decode("utf8")))
 
 	# finalize the order with the csr
-	_send_signed_request(account_key, directory, order["finalize"], { "csr": _b64(csr_der) }, "Error finalising order")
+	session.request(order["finalize"], { "csr": _b64(csr_der) }, "Error finalising order")
 
 	# wait for certificate to be issued
 	attempts = 10
 	ok = False
 	while attempts > 0:
 		attempts = attempts - 1
-		_, order, _ = _send_signed_request(account_key, directory,
-			order_headers["Location"], None, "Error checking challenge")
+		_, order, _ = session.request(order_headers["Location"], None, "Error checking challenge")
 
 		if order["status"] in ["pending", "processing"]:
 			time.sleep(2)
@@ -433,13 +431,11 @@ def cert(account_key, config_file, request_file, log, directory):
 			raise ValueError("Certificate was not issued: {0}".format(order))
 
 	# return signed certificate
-	_, result, _ = _send_signed_request(account_key, directory, order["certificate"], None, "Certificate download failed")
+	_, result, _ = session.request(order["certificate"], None, "Certificate download failed")
 	log.info("Certificate signed")
 	return result
 
-def revoke(account_key, cert, reason, log, directory):
-	account_key = get_account_key(account_key, log)
-
+def revoke(session, cert, reason):
 	with open(cert, "r") as f:
 		data = ""
 		in_cert = False
@@ -454,10 +450,10 @@ def revoke(account_key, cert, reason, log, directory):
 
 		data = base64.b64decode(data)
 
-	register(account_key, None, log, directory)
+	session.start()
 
 	log.info("Revoking certificate...")
-	_send_signed_request(account_key, directory, directory["revokeCert"], {
+	session.request(session.directory["revokeCert"], {
 		"certificate": _b64(data),
 		"reason": reason,
 	}, "Error revoking certificate")
@@ -466,7 +462,7 @@ def revoke(account_key, cert, reason, log, directory):
 def main(argv):
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--quiet", action="store_const", const=logging.ERROR, help="suppress output except for errors")
-	parser.add_argument("--ca", default=DEFAULT_CA, help="certificate authority, default is Let's Encrypt")
+	parser.add_argument("--directory", default=DEFAULT_DIRECTORY, help="certificate authority directory, default is Let's Encrypt")
 	subparsers = parser.add_subparsers(dest="subparser_name")
 
 	parser_reg = subparsers.add_parser("register")
@@ -492,23 +488,23 @@ def main(argv):
 	parser_revoke.add_argument("--reason", required=True, type=int, help="reason code")
 
 	args = parser.parse_args(argv)
-	LOGGER.setLevel(args.quiet or LOGGER.level)
+	log.setLevel(args.quiet or log.level)
 
-	_, directory, _ = _do_request(args.ca + "/directory", err_msg="Error getting directory")
+	session = AccountSession(args.account_key, args.directory) if "account_key" in args else None
 
 	if args.subparser_name == "register":
-		register(args.account_key, args.email, log=LOGGER, directory=directory)
+		register(session, args.email)
 	elif args.subparser_name == "req":
-		signed_req = req(args.config, args.private_key, False, log=LOGGER)
+		signed_req = req(args.config, args.private_key, False)
 		sys.stdout.write(signed_req)
 	elif args.subparser_name == "selfsign":
-		selfsigned_crt = req(args.config, args.private_key, True, log=LOGGER)
+		selfsigned_crt = req(args.config, args.private_key, True)
 		sys.stdout.write(selfsigned_crt)
 	elif args.subparser_name == "cert":
-		signed_crt = cert(args.account_key, args.config, args.req, log=LOGGER, directory=directory)
+		signed_crt = cert(session, args.config, args.req)
 		sys.stdout.write(signed_crt)
 	elif args.subparser_name == "revoke":
-		revoke(args.account_key, args.cert, args.reason, log=LOGGER, directory=directory)
+		revoke(session, args.cert, args.reason)
 
 if __name__ == "__main__":
 	main(sys.argv[1:])
