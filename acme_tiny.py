@@ -134,6 +134,16 @@ def register(session, email):
 		else:
 			raise ValueError("Error updating registration: {0} {1}".format(code, result))
 
+def deactivate(session):
+	session.start()
+
+	reg = { "status": "deactivated" }
+	code, result, _ = session.request(session.kid, reg, "Error deactivating account")
+	if code == 200:
+		log.info("Deactivated account")
+	else:
+		raise ValueError("Error deactivating account: {0} {1}".format(code, result))
+
 def req(config_file, private_key_file, selfsign):
 	with open(config_file, "rb") as f:
 		pass
@@ -471,6 +481,9 @@ def main(argv):
 	parser_reg.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
 	parser_reg.add_argument("--email", required=True, help="register account with contact email address")
 
+	parser_reg = subparsers.add_parser("deactivate")
+	parser_reg.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
+
 	parser_req = subparsers.add_parser("req")
 	parser_req.add_argument("--config", required=True, help="path to your certificate configuration file")
 	parser_req.add_argument("--private-key", required=True, help="path to your private key")
@@ -496,6 +509,8 @@ def main(argv):
 
 	if args.subparser_name == "register":
 		register(session, args.email)
+	elif args.subparser_name == "deactivate":
+		deactivate(session)
 	elif args.subparser_name == "req":
 		signed_req = req(args.config, args.private_key, False)
 		sys.stdout.write(signed_req)
