@@ -63,22 +63,54 @@ class AccountSession:
 			pass
 
 		log.info("Reading account key...")
-		proc = subprocess.Popen(["openssl", "rsa", "-in", self.account_key, "-noout", "-text"],
+		proc = subprocess.Popen(["openssl", "pkey", "-in", self.account_key, "-noout", "-text"],
 			stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		out, err = proc.communicate()
 		if proc.returncode != 0:
 			raise IOError("OpenSSL Error: {0}".format(err))
-		pub_hex, pub_exp = re.search(
-			r"modulus:\n\s+00:([a-f0-9\:\s]+?)\npublicExponent: ([0-9]+)",
-			out.decode("utf8"), re.MULTILINE|re.DOTALL).groups()
-		pub_exp = "{0:x}".format(int(pub_exp))
-		pub_exp = "0{0}".format(pub_exp) if len(pub_exp) % 2 else pub_exp
-		self.alg = "RS256"
-		self.jwk = {
-			"e": _b64(binascii.unhexlify(pub_exp)),
-			"kty": "RSA",
-			"n": _b64(binascii.unhexlify(re.sub(r"(\s|:)", "", pub_hex))),
-		}
+
+		out = out.decode("utf8")
+		if out.startswith("RSA Private-Key:"):
+			pub_hex, pub_exp = re.search(
+				r"modulus:\n\s+00:([a-f0-9\:\s]+?)\npublicExponent: ([0-9]+)",
+				out, re.MULTILINE|re.DOTALL).groups()
+			pub_exp = "{0:x}".format(int(pub_exp))
+			pub_exp = "0{0}".format(pub_exp) if len(pub_exp) % 2 else pub_exp
+			self.alg = "RS256"
+			self.sign_cmd = ["dgst", "-sha256", "-sign"]
+			self.jwk = {
+				"kty": "RSA",
+				"n": _b64(binascii.unhexlify(re.sub(r"(\s|:)", "", pub_hex))),
+				"e": _b64(binascii.unhexlify(pub_exp)),
+			}
+		elif out.startswith("Private-Key:") and ("ASN1 OID: prime256v1\n" in out or "ASN1 OID: secp384r1\n" in out or "ASN1 OID: secp521r1\n" in out):
+			pub_hex, pub_curve = re.search(
+				r"pub:\n\s+04:([a-f0-9\:\s]+?)\nASN1 OID: [a-zA-Z0-9]+\nNIST CURVE: ([a-zA-Z0-9-]+)\n$",
+				out, re.MULTILINE|re.DOTALL).groups()
+			pub_hex = re.sub(r"(\s|:)", "", pub_hex)
+			pub_sz = len(pub_hex)//2
+			self.alg = { "P-256": "ES256", "P-384": "ES384", "P-521": "ES512" }[pub_curve]
+			self.sign_cmd = ["dgst", { "P-256": "-sha256", "P-384": "-sha384", "P-521": "-sha512" }[pub_curve], "-sign"]
+			self.jwk = {
+				"kty": "EC",
+				"crv": pub_curve,
+				"x": _b64(binascii.unhexlify(pub_hex[0:pub_sz])),
+				"y": _b64(binascii.unhexlify(pub_hex[pub_sz:])),
+			}
+			print(self.jwk)
+		elif out.startswith("ED25519 Private-Key:") or out.startswith("ED448 Private-Key:"):
+			pub_hex, = re.search(
+				r"pub:\n\s+([a-f0-9\:\s]+?)\n$",
+				out, re.MULTILINE|re.DOTALL).groups()
+			self.alg = "EdDSA"
+			# Signing not supported: https://github.com/openssl/openssl/issues/6988
+			self.jwk = {
+				"kty": "OKP",
+				"crv": out.split(" ")[0].replace("ED", "Ed"),
+				"x": _b64(binascii.unhexlify(re.sub(r"(\s|:)", "", pub_hex))),
+			}
+		else:
+			raise ValueError("Unknown account key type: " + out.splitlines()[0])
 		accountkey_json = json.dumps(self.jwk, sort_keys=True, separators=(",", ":"))
 		self.thumbprint = _b64(hashlib.sha256(accountkey_json.encode("utf8")).digest())
 
@@ -118,7 +150,7 @@ class AccountSession:
 		protected["url"] = url
 		protected["nonce"] = self.get_nonce()
 		protected64 = _b64(json.dumps(protected).encode("utf8"))
-		proc = subprocess.Popen(["openssl", "dgst", "-sha256", "-sign", self.account_key],
+		proc = subprocess.Popen(["openssl"] + self.sign_cmd + [self.account_key],
 			stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		out, err = proc.communicate("{0}.{1}".format(protected64, payload64).encode("utf8"))
 		if proc.returncode != 0:
