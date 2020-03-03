@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, configparser
+import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, configparser, yaml
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
@@ -460,7 +460,26 @@ def cert(session, config_file, request_file):
 	# return signed certificate
 	_, result, _ = session.request(order["certificate"], None, "Certificate download failed")
 	log.info("Certificate signed")
-	return result
+
+	ee_cert = ""
+	issuer_cert = ""
+	ee = True
+	for line in result.splitlines():
+		if line == "":
+			continue
+
+		if ee:
+			ee_cert += line + "\n"
+		else:
+			issuer_cert += line + "\n"
+
+		if line == "-----END CERTIFICATE-----":
+			ee = False
+
+	if not ee_cert or not issuer_cert:
+		raise ValueError("Invalid certificate chain: " + repr(result))
+
+	return yaml.dump({"end-entity": ee_cert, "issuer": issuer_cert}, default_style="|", default_flow_style=False)
 
 def revoke(session, cert, reason):
 	with open(cert, "r") as f:
