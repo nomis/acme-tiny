@@ -97,7 +97,9 @@ class AccountSession:
 
 		self.kid = headers["Location"]
 		if code == 201:
-			log.info("Registered account " + str(result["createdAt"]))
+			log.info("Registered account " + str(result["createdAt"]) + " " + self.kid)
+		elif code == 200:
+			log.info("Existing account " + str(result["createdAt"]) + " " + self.kid)
 
 	def request(self, url, payload, err_msg, depth=0):
 		payload64 = "" if payload is None else _b64(json.dumps(payload).encode("utf8"))
@@ -128,7 +130,7 @@ def register(session, email):
 		reg = { "contact": ["mailto:" + x for x in [email]] }
 		code, result, _ = session.request(session.kid, reg, "Error updating contact details")
 		if code == 200:
-			log.info("Updated account " + str(result["createdAt"]))
+			log.info("Updated account " + str(result["createdAt"]) + " " + session.kid)
 		else:
 			raise ValueError("Error updating registration: {0} {1}".format(code, result))
 
