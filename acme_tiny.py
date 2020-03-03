@@ -57,6 +57,7 @@ class AccountSession:
 		self.account_key = account_key
 		self.directory_url = directory_url
 		self.kid = None
+		self.nonce = None
 
 		with open(self.account_key, "rb") as f:
 			pass
@@ -101,11 +102,21 @@ class AccountSession:
 		elif code == 200:
 			log.info("Existing account " + str(result["createdAt"]) + " " + self.kid)
 
+	def get_nonce(self):
+		if self.nonce is None:
+			nonce = _do_request(self.directory["newNonce"])[2]["Replay-Nonce"]
+			log.debug("Obtained new nonce " + nonce)
+		else:
+			nonce = self.nonce
+			self.nonce = None
+			log.debug("Using nonce " + nonce)
+		return nonce
+
 	def request(self, url, payload, err_msg, depth=0):
 		payload64 = "" if payload is None else _b64(json.dumps(payload).encode("utf8"))
 		protected = self.header()
 		protected["url"] = url
-		protected["nonce"] = _do_request(self.directory["newNonce"])[2]["Replay-Nonce"]
+		protected["nonce"] = self.get_nonce()
 		protected64 = _b64(json.dumps(protected).encode("utf8"))
 		proc = subprocess.Popen(["openssl", "dgst", "-sha256", "-sign", self.account_key],
 			stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -117,7 +128,11 @@ class AccountSession:
 			"payload": payload64, "signature": _b64(out),
 		})
 		try:
-			return _do_request(url, data.encode("utf8"), err_msg=err_msg, depth=depth)
+			code, data, headers = _do_request(url, data.encode("utf8"), err_msg=err_msg, depth=depth)
+			if "Replay-Nonce" in headers:
+				self.nonce = headers["Replay-Nonce"]
+				log.debug("Saving nonce " + self.nonce)
+			return code, data, headers
 		except IndexError: # retry bad nonces (they raise IndexError)
 			return self.request(url, payload, err_msg, depth=(depth + 1))
 		except HTTPError as e:
@@ -474,6 +489,7 @@ def revoke(session, cert, reason):
 def main(argv):
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--quiet", action="store_const", const=logging.ERROR, help="suppress output except for errors")
+	parser.add_argument("--verbose", action="store_const", const=logging.DEBUG, help="increase verbosity of output")
 	parser.add_argument("--directory", default=DEFAULT_DIRECTORY, help="certificate authority directory, default is Let's Encrypt")
 	subparsers = parser.add_subparsers(dest="subparser_name")
 
@@ -503,7 +519,7 @@ def main(argv):
 	parser_revoke.add_argument("--reason", required=True, type=int, help="reason code")
 
 	args = parser.parse_args(argv)
-	log.setLevel(args.quiet or log.level)
+	log.setLevel(args.verbose or args.quiet or log.level)
 
 	session = AccountSession(args.account_key, args.directory) if "account_key" in args else None
 
