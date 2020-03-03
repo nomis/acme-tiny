@@ -144,23 +144,27 @@ class AccountSession:
 			log.debug("Using nonce " + nonce)
 		return nonce
 
-	def request(self, url, payload, err_msg, depth=0):
+	def sign(self, payload, url, nonce=True):
 		payload64 = "" if payload is None else _b64(json.dumps(payload).encode("utf8"))
 		protected = self.header()
 		protected["url"] = url
-		protected["nonce"] = self.get_nonce()
+		if nonce:
+			protected["nonce"] = self.get_nonce()
 		protected64 = _b64(json.dumps(protected).encode("utf8"))
 		proc = subprocess.Popen(["openssl"] + self.sign_cmd + [self.account_key],
 			stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		out, err = proc.communicate("{0}.{1}".format(protected64, payload64).encode("utf8"))
 		if proc.returncode != 0:
 			raise IOError("OpenSSL Error: {0}".format(err))
-		data = json.dumps({
+		return {
 			"protected": protected64,
-			"payload": payload64, "signature": _b64(out),
-		})
+			"payload": payload64,
+			"signature": _b64(out),
+		}
+
+	def request(self, url, payload, err_msg, depth=0):
 		try:
-			code, data, headers = _do_request(url, data.encode("utf8"), err_msg=err_msg, depth=depth)
+			code, data, headers = _do_request(url, json.dumps(self.sign(payload, url)).encode("utf8"), err_msg=err_msg, depth=depth)
 			if "Replay-Nonce" in headers:
 				self.nonce = headers["Replay-Nonce"]
 				log.debug("Saving nonce " + self.nonce)
@@ -180,6 +184,16 @@ def register(session, email):
 			log.info("Updated account " + str(result["createdAt"]) + " " + session.kid)
 		else:
 			raise ValueError("Error updating registration: {0} {1}".format(code, result))
+
+def change(session, new_session):
+	session.start()
+
+	data = new_session.sign({ "account": session.kid, "oldKey": session.jwk }, session.directory["keyChange"], False)
+	code, result, _ = session.request(session.directory["keyChange"], data, "Error changing key")
+	if code == 200:
+		log.info("Changed key")
+	else:
+		raise ValueError("Error changing key: {0} {1}".format(code, result))
 
 def deactivate(session):
 	session.start()
@@ -548,6 +562,10 @@ def main(argv):
 	parser_reg.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
 	parser_reg.add_argument("--email", required=True, help="register account with contact email address")
 
+	parser_reg = subparsers.add_parser("change")
+	parser_reg.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
+	parser_reg.add_argument("--new-account-key", required=True, help="path to your new Let's Encrypt account private key")
+
 	parser_reg = subparsers.add_parser("deactivate")
 	parser_reg.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
 
@@ -576,6 +594,8 @@ def main(argv):
 
 	if args.subparser_name == "register":
 		register(session, args.email)
+	elif args.subparser_name == "change":
+		change(session, AccountSession(args.new_account_key, args.directory))
 	elif args.subparser_name == "deactivate":
 		deactivate(session)
 	elif args.subparser_name == "req":
