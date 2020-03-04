@@ -77,27 +77,30 @@ class AccountSession:
 			pub_exp = "{0:x}".format(int(pub_exp))
 			pub_exp = "0{0}".format(pub_exp) if len(pub_exp) % 2 else pub_exp
 			self.alg = "RS256"
-			self.sign_cmd = ["dgst", "-sha256", "-sign"]
+			self.sign_cmd = ["pkeyutl", "-pkeyopt", "digest:sha256", "-sign", "-inkey"]
 			self.jwk = {
 				"kty": "RSA",
 				"n": _b64(binascii.unhexlify(re.sub(r"(\s|:)", "", pub_hex))),
 				"e": _b64(binascii.unhexlify(pub_exp)),
 			}
-		elif out.startswith("Private-Key:") and ("ASN1 OID: prime256v1\n" in out or "ASN1 OID: secp384r1\n" in out or "ASN1 OID: secp521r1\n" in out):
+		elif out.startswith("Private-Key:"):
 			pub_hex, pub_curve = re.search(
-				r"pub:\n\s+04:([a-f0-9\:\s]+?)\nASN1 OID: [a-zA-Z0-9]+\nNIST CURVE: ([a-zA-Z0-9-]+)\n$",
+				r"pub:\n\s+04:([a-f0-9\:\s]+?)\n(?:ASN1 OID: [a-zA-Z0-9]+\n)?NIST CURVE: ([a-zA-Z0-9-]+)\n$",
 				out, re.MULTILINE|re.DOTALL).groups()
 			pub_hex = re.sub(r"(\s|:)", "", pub_hex)
 			pub_sz = len(pub_hex)//2
+
+			if pub_curve not in ["P-256", "P-384", "P-521"]:
+				raise ValueError("Unknown curve: " + pub_curve)
+
 			self.alg = { "P-256": "ES256", "P-384": "ES384", "P-521": "ES512" }[pub_curve]
-			self.sign_cmd = ["dgst", { "P-256": "-sha256", "P-384": "-sha384", "P-521": "-sha512" }[pub_curve], "-sign"]
+			self.sign_cmd = ["pkeyutl", "-sign", "-inkey"]
 			self.jwk = {
 				"kty": "EC",
 				"crv": pub_curve,
 				"x": _b64(binascii.unhexlify(pub_hex[0:pub_sz])),
 				"y": _b64(binascii.unhexlify(pub_hex[pub_sz:])),
 			}
-			print(self.jwk)
 		elif out.startswith("ED25519 Private-Key:") or out.startswith("ED448 Private-Key:"):
 			pub_hex, = re.search(
 				r"pub:\n\s+([a-f0-9\:\s]+?)\n$",
@@ -144,6 +147,31 @@ class AccountSession:
 			log.debug("Using nonce " + nonce)
 		return nonce
 
+	def _sign_input(self, data):
+		return {
+			"RS256": hashlib.sha256,
+			"ES256": hashlib.sha256,
+			"ES384": hashlib.sha384,
+			"ES512": hashlib.sha512,
+		}[self.alg](data).digest()
+
+	def _sign_output(self, data):
+		if self.alg.startswith("ES"):
+			sz = {
+				"ES256": 32,
+				"ES384": 48,
+				"ES512": 66,
+			}[self.alg]
+			proc = subprocess.Popen(["openssl", "asn1parse", "-inform", "DER"],
+				stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+			out, err = proc.communicate(data)
+			if proc.returncode != 0:
+				raise IOError("OpenSSL Error: {0}".format(err))
+			(r, s) = [line.split(":")[-1].ljust(sz, "0") for line in out.decode("utf8").splitlines()[1:3]]
+			return binascii.unhexlify(r) + binascii.unhexlify(s)
+		else:
+			return data
+
 	def sign(self, payload, url, nonce=True):
 		payload64 = "" if payload is None else _b64(json.dumps(payload).encode("utf8"))
 		protected = self.header()
@@ -153,9 +181,10 @@ class AccountSession:
 		protected64 = _b64(json.dumps(protected).encode("utf8"))
 		proc = subprocess.Popen(["openssl"] + self.sign_cmd + [self.account_key],
 			stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-		out, err = proc.communicate("{0}.{1}".format(protected64, payload64).encode("utf8"))
+		out, err = proc.communicate(self._sign_input("{0}.{1}".format(protected64, payload64).encode("utf8")))
 		if proc.returncode != 0:
 			raise IOError("OpenSSL Error: {0}".format(err))
+		out = self._sign_output(out)
 		return {
 			"protected": protected64,
 			"payload": payload64,
