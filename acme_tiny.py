@@ -481,10 +481,14 @@ def cert(session, config_file, request_file):
 		"identifiers": [{"type": "dns", "value": hostname} for hostname in hostnames]
 	}, "Error creating order")
 
+	for auth_url in order["authorizations"]:
+		log.info("Authorisation {0}".format(auth_url))
+
 	# verify each hostname
 	for auth_url in order["authorizations"]:
 		_, authorisation, _ = session.request(auth_url, None, "Error getting challenges")
 		hostname = authorisation["identifier"]["value"]
+		log.info("Need to authorise {1} using {2} for {0}".format(auth_url, hostname, repr([challenge["type"] for challenge in authorisation["challenges"]])))
 		if hostname not in hostnames:
 			raise ValueError("Asked to verify {0} which was not requested".format(hostname))
 
