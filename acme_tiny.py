@@ -70,7 +70,7 @@ class AccountSession:
 			raise IOError("OpenSSL Error: {0}".format(err))
 
 		out = out.decode("utf8")
-		if out.startswith("RSA Private-Key:"):
+		if out.startswith("RSA Private-Key:") or (out.startswith("Private-Key:") and "modulus:" in out and "publicExponent:" in out):
 			pub_hex, pub_exp = re.search(
 				r"modulus:\n\s+00:([a-f0-9\:\s]+?)\npublicExponent: ([0-9]+)",
 				out, re.MULTILINE|re.DOTALL).groups()
@@ -83,7 +83,7 @@ class AccountSession:
 				"n": _b64(binascii.unhexlify(re.sub(r"(\s|:)", "", pub_hex))),
 				"e": _b64(binascii.unhexlify(pub_exp)),
 			}
-		elif out.startswith("Private-Key:"):
+		elif out.startswith("Private-Key:") and ("NIST CURVE:" in out):
 			pub_hex, pub_curve = re.search(
 				r"pub:\n\s+04:([a-f0-9\:\s]+?)\n(?:ASN1 OID: [a-zA-Z0-9]+\n)?NIST CURVE: ([a-zA-Z0-9-]+)\n$",
 				out, re.MULTILINE|re.DOTALL).groups()
