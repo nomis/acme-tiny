@@ -272,7 +272,10 @@ class ChallengeHandler:
 		self.token = re.sub(r"[^A-Za-z0-9_\-]", "_", data["token"])
 		self.keyauthorization = "{0}.{1}".format(self.token, self.session.thumbprint)
 
-	def valid(self):
+	def prepare(self):
+		return False
+
+	def check(self):
 		# notify challenge are met
 		_, result, _ = self.session.request(self.url, {
 			"keyAuthorization": self.keyauthorization,
@@ -310,7 +313,7 @@ class Http01ChallengeHandler(ChallengeHandler):
 		if self.wellknown_path:
 			os.remove(self.wellknown_path)
 
-	def valid(self):
+	def prepare(self):
 		if not self.wellknown_path:
 			return False
 
@@ -324,7 +327,7 @@ class Http01ChallengeHandler(ChallengeHandler):
 			raise ValueError("Wrote file to {0}, but couldn't download {1}".format(
 				self.wellknown_path, wellknown_url))
 
-		return super().valid()
+		return True
 
 class Dns01ChallengeHandler(ChallengeHandler):
 	def __init__(self, hostname, data, session, config):
@@ -403,7 +406,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 
 		return ns
 
-	def valid(self):
+	def prepare(self):
 		if not self.zone_file or not self.zone_cmd:
 			return False
 
@@ -449,7 +452,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 					pass
 
 			if success and not failed:
-				return super().valid()
+				return True
 			log.info("Retrying")
 
 		return False
@@ -498,13 +501,22 @@ def cert(session, config_file, request_file):
 		for challenge in authorisation["challenges"]:
 			if challenge["type"] in CHALLENGE_TYPES:
 				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, session, config[hostname]) as c:
-					if c.valid():
+					if c.prepare():
 						valid += 1
-						ok = True
-						break
+
+						if c.check():
+							ok = True
+							break
+						else:
+							log.info("Timeout checking challenge {0}".format(challenge["type"]))
+					else:
+						log.info("Failed to prepare challenge {0}".format(challenge["type"]))
+
+		if not valid:
+			raise ValueError("No valid challenge types for {0}".format(hostname))
 
 		if not ok:
-			raise ValueError("No valid challenge types for {0}".format(hostname))
+			raise ValueError("All challenges failed for {0}".format(hostname))
 
 	if valid != len(order["authorizations"]):
 		raise ValueError("Unable to complete all authorisations ({0} < {1})".format(valid, len(order["authorizations"])))
