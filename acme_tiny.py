@@ -286,7 +286,8 @@ class ChallengeHandler:
 			attempts = attempts - 1
 			_, challenge_status, _ = self.session.request(self.url, None, "Error checking challenge")
 
-			if challenge_status["status"] == "pending":
+			if challenge_status["status"] in ["pending", "processing"]:
+				log.info("{0} challenge {1}".format(self.hostname, challenge_status["status"]))
 				time.sleep(2)
 			elif challenge_status["status"] == "valid":
 				log.info("{0} verified".format(self.hostname))
@@ -540,6 +541,7 @@ def cert(session, config_file, request_file):
 		_, order, _ = session.request(order_headers["Location"], None, "Error checking challenge")
 
 		if order["status"] in ["pending", "processing"]:
+			log.info("Order {0}".format(order["status"]))
 			time.sleep(2)
 		elif order["status"] == "valid":
 			log.info("Certificate ready")
