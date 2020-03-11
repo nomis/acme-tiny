@@ -280,15 +280,23 @@ class ChallengeHandler:
 		_, result, _ = self.session.request(self.url, {
 			"keyAuthorization": self.keyauthorization,
 		}, "Error triggering challenge")
+		log.debug("{0} challenge: {1}".format(self.hostname, repr(result)))
+
 		# wait for challenge to be verified
-		attempts = 10
+		attempts = 30
 		while attempts > 0:
 			attempts = attempts - 1
 			_, challenge_status, _ = self.session.request(self.url, None, "Error checking challenge")
 
 			if challenge_status["status"] in ["pending", "processing"]:
-				log.info("{0} challenge {1}".format(self.hostname, challenge_status["status"]))
-				time.sleep(2)
+				log.info("{0} challenge {1}: {2}".format(self.hostname, challenge_status["status"], challenge_status.get("error")))
+				time.sleep(4)
+
+				if attempts % 10 == 0:
+					_, result, _ = self.session.request(self.url, {
+						"keyAuthorization": self.keyauthorization,
+					}, "Error triggering challenge")
+					log.debug("{0} challenge: {1}".format(self.hostname, repr(result)))
 			elif challenge_status["status"] == "valid":
 				log.info("{0} verified".format(self.hostname))
 				return True
@@ -534,7 +542,7 @@ def cert(session, config_file, request_file):
 	session.request(order["finalize"], { "csr": _b64(csr_der) }, "Error finalising order")
 
 	# wait for certificate to be issued
-	attempts = 10
+	attempts = 30
 	ok = False
 	while attempts > 0:
 		attempts = attempts - 1
@@ -542,7 +550,7 @@ def cert(session, config_file, request_file):
 
 		if order["status"] in ["pending", "processing"]:
 			log.info("Order {0}".format(order["status"]))
-			time.sleep(2)
+			time.sleep(4)
 		elif order["status"] == "valid":
 			log.info("Certificate ready")
 			ok = True
