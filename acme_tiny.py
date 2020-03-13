@@ -272,6 +272,9 @@ class ChallengeHandler:
 		self.token = re.sub(r"[^A-Za-z0-9_\-]", "_", data["token"])
 		self.keyauthorization = "{0}.{1}".format(self.token, self.session.thumbprint)
 
+	def supported(self):
+		return False
+
 	def prepare(self):
 		return False
 
@@ -280,7 +283,7 @@ class ChallengeHandler:
 		_, result, _ = self.session.request(self.url, {
 			"keyAuthorization": self.keyauthorization,
 		}, "Error triggering challenge")
-		log.debug("{0} challenge: {1}".format(self.hostname, repr(result)))
+		log.debug("Challenge: {0}".format(repr(result)))
 
 		# wait for challenge to be verified
 		attempts = 30
@@ -289,20 +292,19 @@ class ChallengeHandler:
 			_, challenge_status, _ = self.session.request(self.url, None, "Error checking challenge")
 
 			if challenge_status["status"] in ["pending", "processing"]:
-				log.info("{0} challenge {1}: {2}".format(self.hostname, challenge_status["status"], challenge_status.get("error")))
+				log.info("Challenge status: {0}".format(repr(challenge_status)))
 				time.sleep(4)
 
 				if attempts % 10 == 0:
 					_, result, _ = self.session.request(self.url, {
 						"keyAuthorization": self.keyauthorization,
 					}, "Error triggering challenge")
-					log.debug("{0} challenge: {1}".format(self.hostname, repr(result)))
+					log.debug("Challenge: {0}".format(repr(result)))
 			elif challenge_status["status"] == "valid":
-				log.info("{0} verified".format(self.hostname))
+				log.info("Verified {0}".format(self.hostname))
 				return True
 			else:
-				raise ValueError("{0} challenge did not pass: {1}".format(
-					self.hostname, challenge_status))
+				raise ValueError("Challenge did not pass: {0}".format(challenge_status))
 		return False
 
 class Http01ChallengeHandler(ChallengeHandler):
@@ -322,8 +324,11 @@ class Http01ChallengeHandler(ChallengeHandler):
 		if self.wellknown_path:
 			os.remove(self.wellknown_path)
 
+	def supported(self):
+		return bool(self.wellknown_path)
+
 	def prepare(self):
-		if not self.wellknown_path:
+		if not self.supported():
 			return False
 
 		# check that the file is in place
@@ -415,8 +420,11 @@ class Dns01ChallengeHandler(ChallengeHandler):
 
 		return ns
 
+	def supported(self):
+		return bool(self.zone_file) and bool(self.zone_cmd)
+
 	def prepare(self):
-		if not self.zone_file or not self.zone_cmd:
+		if not self.supported():
 			return False
 
 		self.reload()
@@ -510,7 +518,10 @@ def cert(session, config_file, request_file):
 		for challenge in authorisation["challenges"]:
 			if challenge["type"] in CHALLENGE_TYPES:
 				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, session, config[hostname]) as c:
-					if c.prepare():
+					if not c.supported():
+						log.info("Unable to support challenge {0}".format(challenge["type"]))
+					elif c.prepare():
+						log.info("Prepared for challenge {0}".format(challenge["type"]))
 						valid += 1
 
 						if c.check():
