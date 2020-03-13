@@ -20,7 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, configparser
+import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, logging.handlers, configparser, traceback
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
@@ -602,6 +602,7 @@ def main(argv):
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--quiet", action="store_const", const=logging.ERROR, help="suppress output except for errors")
 	parser.add_argument("--verbose", action="store_const", const=logging.DEBUG, help="increase verbosity of output")
+	parser.add_argument("--syslog", help="log to syslog with name")
 	parser.add_argument("--directory", default=DEFAULT_DIRECTORY, help="certificate authority directory, default is Let's Encrypt")
 	subparsers = parser.add_subparsers(dest="subparser_name")
 
@@ -637,6 +638,11 @@ def main(argv):
 	args = parser.parse_args(argv)
 	log.setLevel(args.verbose or args.quiet or log.level)
 
+	if args.syslog:
+		handler = logging.handlers.SysLogHandler("/dev/log")
+		handler.setFormatter(logging.Formatter(args.syslog + ": %(levelname)s %(message)s"))
+		log.addHandler(handler)
+
 	session = AccountSession(args.account_key, args.directory) if "account_key" in args else None
 
 	if args.subparser_name == "register":
@@ -658,4 +664,11 @@ def main(argv):
 		revoke(session, args.cert, args.reason)
 
 if __name__ == "__main__":
-	main(sys.argv[1:])
+	try:
+		main(sys.argv[1:])
+	except:
+		for line in traceback.format_exc().strip().split("\n"):
+			log.critical(line)
+		raise
+	sys.stdout.flush()
+	sys.stderr.flush()
