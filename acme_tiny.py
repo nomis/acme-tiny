@@ -607,15 +607,15 @@ def main(argv):
 	subparsers = parser.add_subparsers(dest="subparser_name")
 
 	parser_reg = subparsers.add_parser("register")
-	parser_reg.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
+	parser_reg.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
 	parser_reg.add_argument("--email", required=True, help="register account with contact email address")
 
 	parser_reg = subparsers.add_parser("change")
-	parser_reg.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
-	parser_reg.add_argument("--new-account-key", required=True, help="path to your new Let's Encrypt account private key")
+	parser_reg.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
+	parser_reg.add_argument("--new-account-key", required=True, help="path to your new ACMEv2 account private key")
 
 	parser_reg = subparsers.add_parser("deactivate")
-	parser_reg.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
+	parser_reg.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
 
 	parser_req = subparsers.add_parser("req")
 	parser_req.add_argument("--config", required=True, help="path to your certificate configuration file")
@@ -626,12 +626,12 @@ def main(argv):
 	parser_selfsign.add_argument("--private-key", required=True, help="path to your private key")
 
 	parser_cert = subparsers.add_parser("cert")
-	parser_cert.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
+	parser_cert.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
 	parser_cert.add_argument("--config", required=True, help="path to your certificate configuration file")
 	parser_cert.add_argument("--req", required=True, help="path to your certificate request")
 
 	parser_revoke = subparsers.add_parser("revoke")
-	parser_revoke.add_argument("--account-key", required=True, help="path to your Let's Encrypt account private key")
+	parser_revoke.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
 	parser_revoke.add_argument("--cert", required=True, help="path to your certificate")
 	parser_revoke.add_argument("--reason", required=True, type=int, help="reason code")
 
