@@ -606,31 +606,31 @@ def main(argv):
 	parser.add_argument("--directory", default=DEFAULT_DIRECTORY, help="certificate authority directory, default is Let's Encrypt")
 	subparsers = parser.add_subparsers(dest="subparser_name")
 
-	parser_reg = subparsers.add_parser("register")
+	parser_reg = subparsers.add_parser("register", help="register or modify account")
 	parser_reg.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
 	parser_reg.add_argument("--email", required=True, help="register account with contact email address")
 
-	parser_reg = subparsers.add_parser("change")
+	parser_reg = subparsers.add_parser("change", help="change account private key")
 	parser_reg.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
 	parser_reg.add_argument("--new-account-key", required=True, help="path to your new ACMEv2 account private key")
 
-	parser_reg = subparsers.add_parser("deactivate")
+	parser_reg = subparsers.add_parser("deactivate", help="deactivate account permanently")
 	parser_reg.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
 
-	parser_req = subparsers.add_parser("req")
+	parser_req = subparsers.add_parser("req", help="create certificate signing request")
 	parser_req.add_argument("--config", required=True, help="path to your certificate configuration file")
 	parser_req.add_argument("--private-key", required=True, help="path to your private key")
 
-	parser_selfsign = subparsers.add_parser("selfsign")
+	parser_selfsign = subparsers.add_parser("selfsign", help="create self-signed certificate")
 	parser_selfsign.add_argument("--config", required=True, help="path to your certificate configuration file")
 	parser_selfsign.add_argument("--private-key", required=True, help="path to your private key")
 
-	parser_cert = subparsers.add_parser("cert")
+	parser_cert = subparsers.add_parser("cert", help="issue a new certificate")
 	parser_cert.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
 	parser_cert.add_argument("--config", required=True, help="path to your certificate configuration file")
 	parser_cert.add_argument("--req", required=True, help="path to your certificate request")
 
-	parser_revoke = subparsers.add_parser("revoke")
+	parser_revoke = subparsers.add_parser("revoke", help="revoke certificate")
 	parser_revoke.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
 	parser_revoke.add_argument("--cert", required=True, help="path to your certificate")
 	parser_revoke.add_argument("--reason", required=True, type=int, help="reason code")
@@ -662,10 +662,14 @@ def main(argv):
 		sys.stdout.write(signed_crt)
 	elif args.subparser_name == "revoke":
 		revoke(session, args.cert, args.reason)
+	else:
+		parser.error("No command specified")
 
 if __name__ == "__main__":
 	try:
 		main(sys.argv[1:])
+	except SystemExit:
+		pass
 	except:
 		for line in traceback.format_exc().strip().split("\n"):
 			log.critical(line)
