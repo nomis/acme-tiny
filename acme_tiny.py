@@ -361,6 +361,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 				if not line.startswith(self.zone_name + " "):
 					content += line
 
+		log.debug("Zone update: {0}={1}".format(self.zone_name, self.txt_value))
 		content += self.zone_name + ' 1 TXT "' + self.txt_value + '"\n'
 
 		with open(self.zone_file, "w") as f:
@@ -451,6 +452,8 @@ class Dns01ChallengeHandler(ChallengeHandler):
 					ok = False
 					for rrset in m.answer:
 						for rdata in rrset:
+							if rdata.rdtype == dns.rdatatype.TXT:
+								log.debug(log_message + " TXT " + repr(rdata.strings))
 							if rdata.rdtype == dns.rdatatype.TXT and rdata.strings[0] == self.txt_value:
 								ok = True
 					if ok:
