@@ -453,14 +453,14 @@ class Dns01ChallengeHandler(ChallengeHandler):
 					for rrset in m.answer:
 						for rdata in rrset:
 							if rdata.rdtype == dns.rdatatype.TXT:
-								log.debug(log_message + " TXT " + repr(rdata.strings))
+								log.debug(log_message + "TXT " + repr(rdata.strings))
 							if rdata.rdtype == dns.rdatatype.TXT and rdata.strings[0] == self.txt_value.encode("us-ascii"):
 								ok = True
 					if ok:
 						log.info(log_message + "OK")
 						success = True
 					else:
-						log.info(log_message + "No data")
+						log.info(log_message + "Missing")
 						failed = True
 				except OSError:
 					# Ignore unreachable errors
