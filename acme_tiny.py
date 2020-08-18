@@ -636,7 +636,7 @@ def main(argv):
 	parser_revoke = subparsers.add_parser("revoke", help="revoke certificate")
 	parser_revoke.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
 	parser_revoke.add_argument("--cert", required=True, help="path to your certificate")
-	parser_revoke.add_argument("--reason", required=True, type=int, help="reason code")
+	parser_revoke.add_argument("--reason", required=True, type=int, help="reason code (0=unspecified, 1=keyCompromise, 3=affiliationChanged, 4=superseded, 5=cessationOfOperation)")
 
 	args = parser.parse_args(argv)
 	log.setLevel(args.verbose or args.quiet or log.level)
