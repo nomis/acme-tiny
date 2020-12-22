@@ -20,12 +20,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, logging.handlers, configparser, traceback
+import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, logging.handlers, configparser, traceback, requests
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
 DEFAULT_DIRECTORY = "https://acme-v02.api.letsencrypt.org/directory"
 #DEFAULT_DIRECTORY = "https://acme-staging-v02.api.letsencrypt.org/directory"
+
+PEM_RE = re.compile("-----BEGIN CERTIFICATE-----\r?\n.+?\r?\n-----END CERTIFICATE-----\r?\n?", re.DOTALL)
 
 log = logging.getLogger(__name__)
 log.addHandler(logging.StreamHandler())
@@ -51,6 +53,23 @@ def _do_request(url, data=None, err_msg="Error", depth=0):
 	if code not in [200, 201, 204]:
 		raise ValueError("{0}:\nURL: {1}\nData: {2}\nResponse Code: {3}\nResponse: {4}".format(err_msg, url, data, code, resp_data))
 	return code, resp_data, headers
+
+def _pem(data):
+	return [match.group(0) for match in PEM_RE.finditer(data)]
+
+def _issuer_names(data):
+	names = []
+
+	for cert in _pem(data):
+		proc = subprocess.Popen(["openssl", "x509", "-noout", "-issuer"],
+			stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		out, err = proc.communicate(cert.encode("utf8"))
+		if proc.returncode != 0:
+			raise IOError("OpenSSL Error: {0}".format(err))
+
+		names.append(out.decode("utf8").splitlines()[0].split("=", 1)[1])
+
+	return list(reversed(names))
 
 class AccountSession:
 	def __init__(self, account_key, directory_url):
@@ -482,7 +501,7 @@ CHALLENGE_TYPES = {
 	"dns-01": Dns01ChallengeHandler,
 }
 
-def cert(session, config_file, request_file):
+def cert(session, config_file, request_file, preferred_path=None):
 	with open(config_file, "rb") as f:
 		pass
 
@@ -573,9 +592,34 @@ def cert(session, config_file, request_file):
 			raise ValueError("Certificate was not issued: {0}".format(order))
 
 	# return signed certificate
-	_, result, _ = session.request(order["certificate"], None, "Certificate download failed")
+	_, result, headers = session.request(order["certificate"], None, "Certificate download failed")
+	results = [(_issuer_names(result), result)]
 	log.info("Certificate signed")
-	return result
+
+	for name, value in headers.items():
+		if name == "Link":
+			links = requests.utils.parse_header_links(value)
+			for link in links:
+				if link["rel"] == "alternate":
+					log.debug("Alternate: {0}".format(link["url"]))
+					_, data, _ = session.request(link["url"], None, "Alternate download failed")
+					results.append((_issuer_names(data), data))
+
+	result = None
+
+	if preferred_path is not None:
+		for i, value in enumerate(results):
+			if result is None:
+				path = "/".join(value[0])
+				if path == preferred_path or path.startswith(preferred_path + "/"):
+					result = value
+	if result is None:
+		result = results[0]
+
+	for i, value in enumerate(results):
+		log.debug("Paths: {2}{0}: {1}".format(i, value[0], "*" if result == value else " "))
+
+	return result[1]
 
 def revoke(session, cert, reason):
 	with open(cert, "r") as f:
@@ -632,6 +676,7 @@ def main(argv):
 	parser_cert.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
 	parser_cert.add_argument("--config", required=True, help="path to your certificate configuration file")
 	parser_cert.add_argument("--req", required=True, help="path to your certificate request")
+	parser_cert.add_argument("--path", help="preferred issuer path")
 
 	parser_revoke = subparsers.add_parser("revoke", help="revoke certificate")
 	parser_revoke.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
@@ -661,7 +706,7 @@ def main(argv):
 		selfsigned_crt = req(args.config, args.private_key, True)
 		sys.stdout.write(selfsigned_crt)
 	elif args.subparser_name == "cert":
-		signed_crt = cert(session, args.config, args.req)
+		signed_crt = cert(session, args.config, args.req, args.path)
 		sys.stdout.write(signed_crt)
 	elif args.subparser_name == "revoke":
 		revoke(session, args.cert, args.reason)
