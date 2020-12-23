@@ -20,7 +20,24 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-import argparse, subprocess, json, os, sys, base64, binascii, time, hashlib, re, copy, textwrap, logging, logging.handlers, configparser, traceback, requests
+import argparse
+import base64
+import binascii
+import configparser
+import copy
+import fnmatch
+import hashlib
+import json
+import logging
+import logging.handlers
+import os
+import re
+import requests
+import subprocess
+import sys
+import textwrap
+import time
+import traceback
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError
 
@@ -611,7 +628,7 @@ def cert(session, config_file, request_file, preferred_path=None):
 		for i, value in enumerate(results):
 			if result is None:
 				path = "/".join(value[0])
-				if path == preferred_path or path.startswith(preferred_path + "/"):
+				if fnmatch.fnmatchcase(path, preferred_path) or fnmatch.fnmatchcase(path, preferred_path + "/*"):
 					result = value
 	if result is None:
 		result = results[0]
