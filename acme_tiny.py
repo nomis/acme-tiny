@@ -548,15 +548,21 @@ def cert(session, config_file, request_file, preferred_path=None):
 		_, authorisation, _ = session.request(auth_url, None, "Error getting challenges")
 		hostname = authorisation["identifier"]["value"]
 		log.info("Need to authorise {1} using {2} for {0}".format(auth_url, hostname, repr([challenge["type"] for challenge in authorisation["challenges"]])))
-		if hostname not in hostnames:
+
+		wildcard_hostname = "*." + hostname
+		if hostname not in hostnames and wildcard_hostname not in hostnames:
 			raise ValueError("Asked to verify {0} which was not requested".format(hostname))
+
+		config_hostname = hostname
+		if hostname not in hostnames and wildcard_hostname in hostnames:
+			config_hostname = wildcard_hostname
 
 		log.info("Verifying {0}...".format(hostname))
 
 		ok = False
 		for challenge in authorisation["challenges"]:
 			if challenge["type"] in CHALLENGE_TYPES:
-				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, session, config[hostname]) as c:
+				with CHALLENGE_TYPES[challenge["type"]](hostname, challenge, session, config[config_hostname]) as c:
 					if not c.supported():
 						log.info("Unable to support challenge {0}".format(challenge["type"]))
 					elif c.prepare():
