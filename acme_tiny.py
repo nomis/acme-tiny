@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright 2015  Daniel Roesler
-# Copyright 2015-2018,2020  Simon Arlott
+# Copyright 2015-2018,2020-2021,2023  Simon Arlott
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -35,6 +35,7 @@ import re
 import requests
 import subprocess
 import sys
+import tempfile
 import textwrap
 import time
 import traceback
@@ -113,7 +114,8 @@ class AccountSession:
 			pub_exp = "{0:x}".format(int(pub_exp))
 			pub_exp = "0{0}".format(pub_exp) if len(pub_exp) % 2 else pub_exp
 			self.alg = "RS256"
-			self.sign_cmd = ["pkeyutl", "-pkeyopt", "digest:sha256", "-sign", "-inkey"]
+			self.hash_input = hashlib.sha256
+			self.sign_cmd = ["-pkeyopt", "digest:sha256"]
 			self.jwk = {
 				"kty": "RSA",
 				"n": _b64(binascii.unhexlify(re.sub(r"(\s|:)", "", pub_hex))),
@@ -130,7 +132,12 @@ class AccountSession:
 				raise ValueError("Unknown curve: " + pub_curve)
 
 			self.alg = { "P-256": "ES256", "P-384": "ES384", "P-521": "ES512" }[pub_curve]
-			self.sign_cmd = ["pkeyutl", "-sign", "-inkey"]
+			self.hash_input = {
+				"P-256": hashlib.sha256,
+				"P-384": hashlib.sha384,
+				"P-512": hashlib.sha512,
+			}[pub_curve]
+			self.sign_cmd = []
 			self.jwk = {
 				"kty": "EC",
 				"crv": pub_curve,
@@ -142,7 +149,8 @@ class AccountSession:
 				r"pub:\n\s+([a-f0-9\:\s]+?)\n$",
 				out, re.MULTILINE|re.DOTALL).groups()
 			self.alg = "EdDSA"
-			# Signing not supported: https://github.com/openssl/openssl/issues/6988
+			self.sign_cmd = ["-rawin"]
+			self.hash_input = None
 			self.jwk = {
 				"kty": "OKP",
 				"crv": out.split(" ")[0].replace("ED", "Ed"),
@@ -184,12 +192,10 @@ class AccountSession:
 		return nonce
 
 	def _sign_input(self, data):
-		return {
-			"RS256": hashlib.sha256,
-			"ES256": hashlib.sha256,
-			"ES384": hashlib.sha384,
-			"ES512": hashlib.sha512,
-		}[self.alg](data).digest()
+		if self.hash_input:
+			return self.hash_input(data).digest()
+		else:
+			return data
 
 	def _sign_output(self, data):
 		if self.alg.startswith("ES"):
@@ -215,9 +221,11 @@ class AccountSession:
 		if nonce:
 			protected["nonce"] = self.get_nonce()
 		protected64 = _b64(json.dumps(protected).encode("utf8"))
-		proc = subprocess.Popen(["openssl"] + self.sign_cmd + [self.account_key],
-			stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-		out, err = proc.communicate(self._sign_input("{0}.{1}".format(protected64, payload64).encode("utf8")))
+		with tempfile.TemporaryFile() as f:
+			f.write(self._sign_input("{0}.{1}".format(protected64, payload64).encode("utf8")))
+			proc = subprocess.Popen(["openssl", "pkeyutl", "-sign"] + self.sign_cmd + ["-inkey", self.account_key, "-in", "/dev/fd/0"],
+				stdin=f, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+		out, err = proc.communicate()
 		if proc.returncode != 0:
 			raise IOError("OpenSSL Error: {0}".format(err))
 		out = self._sign_output(out)
