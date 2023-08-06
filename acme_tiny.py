@@ -223,6 +223,8 @@ class AccountSession:
 		protected64 = _b64(json.dumps(protected).encode("utf8"))
 		with tempfile.TemporaryFile() as f:
 			f.write(self._sign_input("{0}.{1}".format(protected64, payload64).encode("utf8")))
+			f.flush()
+			f.seek(0)
 			proc = subprocess.Popen(["openssl", "pkeyutl", "-sign"] + self.sign_cmd + ["-inkey", self.account_key, "-in", "/dev/fd/0"],
 				stdin=f, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 		out, err = proc.communicate()
