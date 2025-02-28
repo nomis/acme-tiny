@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright 2015  Daniel Roesler
-# Copyright 2015-2018,2020-2021,2023  Simon Arlott
+# Copyright 2015-2018,2020-2021,2023,2025  Simon Arlott
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -88,6 +88,42 @@ def _issuer_names(data):
 		names.append(out.decode("utf8").splitlines()[0].split("=", 1)[1])
 
 	return list(reversed(names))
+
+def _ari_certid(data):
+	proc = subprocess.Popen(["openssl", "x509", "-noout", "-text"],
+		stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+	out, err = proc.communicate(data.encode("utf8"))
+	if proc.returncode != 0:
+		raise IOError("OpenSSL Error: {0}".format(err))
+
+	sn = ""
+	aki = ""
+	in_sn = False
+	in_aki = False
+	for line in out.decode("utf8").splitlines():
+		line = line.strip()
+		if in_sn:
+			sn += line
+			if not line.endswith(":"):
+				in_sn = False
+		elif in_aki:
+			aki += line
+			if not line.endswith(":"):
+				in_aki = False
+		elif line == "Serial Number:":
+			in_sn = True
+		elif line == "X509v3 Authority Key Identifier:":
+			in_aki = True
+
+	if sn and aki and aki.startswith("keyid:"):
+		sn = sn.replace(":", "")
+		if int(sn[0], 16) >= 8:
+			sn = "00" + sn
+		sn = _b64(binascii.unhexlify(sn))
+		aki = _b64(binascii.unhexlify(aki.split(":", 1)[1].replace(":", "")))
+		return f"{aki}.{sn}"
+	else:
+		raise ValueError(f"Unknown Serial Number/Authority Key Identifier: {sn=!r} {aki=!r}")
 
 class AccountSession:
 	def __init__(self, account_key, directory_url):
@@ -678,6 +714,16 @@ def revoke(session, cert, reason):
 	}, "Error revoking certificate")
 	log.info("Revoked certificate")
 
+def renewalinfo(session, cert):
+	with open(cert, "r") as f:
+		ari_certid = _ari_certid(f.read())
+
+	session.start()
+
+	log.info("Getting renewal info...")
+	_, result, _ = session.request(session.directory["renewalInfo"] + f"/{ari_certid}", {}, "Error getting renewal info")
+	print("OK:", ari_certid, result["suggestedWindow"]["start"], result["suggestedWindow"]["end"])
+
 def main(argv):
 	parser = argparse.ArgumentParser()
 	parser.add_argument("--quiet", action="store_const", const=logging.ERROR, help="suppress output except for errors")
@@ -716,6 +762,10 @@ def main(argv):
 	parser_revoke.add_argument("--cert", required=True, help="path to your certificate")
 	parser_revoke.add_argument("--reason", required=True, type=int, help="reason code (0=unspecified, 1=keyCompromise, 3=affiliationChanged, 4=superseded, 5=cessationOfOperation)")
 
+	parser_revoke = subparsers.add_parser("renewalinfo", help="get renewal info for certificate")
+	parser_revoke.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
+	parser_revoke.add_argument("--cert", required=True, help="path to your certificate")
+
 	args = parser.parse_args(argv)
 	log.setLevel(args.verbose or args.quiet or log.level)
 
@@ -743,6 +793,8 @@ def main(argv):
 		sys.stdout.write(signed_crt)
 	elif args.subparser_name == "revoke":
 		revoke(session, args.cert, args.reason)
+	elif args.subparser_name == "renewalinfo":
+		renewalinfo(session, args.cert)
 	else:
 		parser.error("No command specified")
 
