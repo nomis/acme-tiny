@@ -196,6 +196,8 @@ class AccountSession:
 			raise ValueError("Unknown account key type: " + out.splitlines()[0])
 		accountkey_json = json.dumps(self.jwk, sort_keys=True, separators=(",", ":"))
 		self.thumbprint = _b64(hashlib.sha256(accountkey_json.encode("utf8")).digest())
+		self.registered_file = os.path.join(os.environ["HOME"], ".cache", "acme-tiny",
+			f"account-{hashlib.sha256(self.directory_url.encode('utf-8')).hexdigest()}-{self.thumbprint}")
 
 	def header(self):
 		if self.kid:
@@ -207,15 +209,25 @@ class AccountSession:
 		log.info("Getting directory...")
 		_, self.directory, _ = _do_request(self.directory_url, err_msg="Error getting directory")
 
-		log.info("Registering account...")
-		reg = { "termsOfServiceAgreed": True }
-		code, result, headers = self.request(self.directory["newAccount"], reg, "Error registering")
+		if os.path.exists(self.registered_file):
+			log.info("Registering account (cached)")
+			with open(self.registered_file, "rt") as f:
+				self.kid = json.loads(f.read())["headers"]["Location"]
+		else:
+			log.info("Registering account...")
+			reg = { "termsOfServiceAgreed": True }
+			code, result, headers = self.request(self.directory["newAccount"], reg, "Error registering")
 
-		self.kid = headers["Location"]
-		if code == 201:
-			log.info("Registered account " + str(result["createdAt"]) + " " + self.kid)
-		elif code == 200:
-			log.info("Existing account " + str(result["createdAt"]) + " " + self.kid)
+			self.kid = headers["Location"]
+			if code == 201:
+				log.info("Registered account " + str(result["createdAt"]) + " " + self.kid)
+			elif code == 200:
+				log.info("Existing account " + str(result["createdAt"]) + " " + self.kid)
+
+			os.makedirs(os.path.dirname(self.registered_file), exist_ok=True)
+			with open(self.registered_file + "~", "wt") as f:
+				f.write(json.dumps({"headers": dict(headers), "result": result}))
+			os.rename(self.registered_file + "~", self.registered_file)
 
 	def get_nonce(self):
 		if self.nonce is None:
