@@ -589,7 +589,7 @@ CHALLENGE_TYPES = {
 	"dns-01": Dns01ChallengeHandler,
 }
 
-def cert(session, config_file, request_file, preferred_path=None):
+def cert(session, config_file, request_file, preferred_path=None, ari=None):
 	with open(config_file, "rb") as f:
 		pass
 
@@ -607,9 +607,10 @@ def cert(session, config_file, request_file, preferred_path=None):
 		raise ValueError("No hostnames defined")
 
 	# create a new order
-	code, order, order_headers = session.request(session.directory["newOrder"], {
-		"identifiers": [{"type": "dns", "value": hostname} for hostname in hostnames]
-	}, "Error creating order")
+	payload = {"identifiers": [{"type": "dns", "value": hostname} for hostname in hostnames]}
+	if ari:
+		payload["replaces"] = ari
+	code, order, order_headers = session.request(session.directory["newOrder"], payload, "Error creating order")
 
 	for auth_url in order["authorizations"]:
 		log.info("Authorisation {0}".format(auth_url))
@@ -781,6 +782,7 @@ def main(argv):
 	parser_cert.add_argument("--config", required=True, help="path to your certificate configuration file")
 	parser_cert.add_argument("--req", required=True, help="path to your certificate request")
 	parser_cert.add_argument("--path", help="preferred issuer path")
+	parser_cert.add_argument("--ari", help="identifier of certificate being renewed")
 
 	parser_revoke = subparsers.add_parser("revoke", help="revoke certificate")
 	parser_revoke.add_argument("--account-key", required=True, help="path to your ACMEv2 account private key")
@@ -814,7 +816,7 @@ def main(argv):
 		selfsigned_crt = req(args.config, args.private_key, True)
 		sys.stdout.write(selfsigned_crt)
 	elif args.subparser_name == "cert":
-		signed_crt = cert(session, args.config, args.req, args.path)
+		signed_crt = cert(session, args.config, args.req, args.path, args.ari)
 		sys.stdout.write(signed_crt)
 	elif args.subparser_name == "revoke":
 		revoke(session, args.cert, args.reason)
