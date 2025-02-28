@@ -131,6 +131,8 @@ class AccountSession:
 		self.directory_url = directory_url
 		self.kid = None
 		self.nonce = None
+		self.directory_file = os.path.join(os.environ["HOME"], ".cache", "acme-tiny",
+			f"directory-{hashlib.sha256(self.directory_url.encode('utf-8')).hexdigest()}")
 
 		with open(self.account_key, "rb") as f:
 			pass
@@ -206,8 +208,19 @@ class AccountSession:
 			return { "alg": self.alg, "jwk": self.jwk }
 
 	def start(self):
-		log.info("Getting directory...")
-		_, self.directory, _ = _do_request(self.directory_url, err_msg="Error getting directory")
+		if os.path.exists(self.directory_file):
+			if time.time() - os.stat(self.directory_file).st_mtime < 86400:
+				log.info("Getting directory (cached)")
+				with open(self.directory_file, "rt") as f:
+					self.directory = json.loads(f.read())
+		else:
+			log.info("Getting directory...")
+			_, self.directory, _ = _do_request(self.directory_url, err_msg="Error getting directory")
+
+			os.makedirs(os.path.dirname(self.directory_file), exist_ok=True)
+			with open(self.directory_file + "~", "wt") as f:
+				f.write(json.dumps(self.directory))
+			os.rename(self.directory_file + "~", self.directory_file)
 
 		if os.path.exists(self.registered_file):
 			log.info("Registering account (cached)")
