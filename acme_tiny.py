@@ -208,11 +208,10 @@ class AccountSession:
 			return { "alg": self.alg, "jwk": self.jwk }
 
 	def start(self):
-		if os.path.exists(self.directory_file):
-			if time.time() - os.stat(self.directory_file).st_mtime < 86400:
-				log.info("Getting directory (cached)")
-				with open(self.directory_file, "rt") as f:
-					self.directory = json.loads(f.read())
+		if os.path.exists(self.directory_file) and time.time() - os.stat(self.directory_file).st_mtime < 86400:
+			log.info("Getting directory (cached)")
+			with open(self.directory_file, "rt") as f:
+				self.directory = json.loads(f.read())
 		else:
 			log.info("Getting directory...")
 			_, self.directory, _ = _do_request(self.directory_url, err_msg="Error getting directory")
@@ -222,7 +221,7 @@ class AccountSession:
 				f.write(json.dumps(self.directory))
 			os.rename(self.directory_file + "~", self.directory_file)
 
-		if os.path.exists(self.registered_file):
+		if os.path.exists(self.registered_file) and time.time() - os.stat(self.registered_file).st_mtime < 86400:
 			log.info("Registering account (cached)")
 			with open(self.registered_file, "rt") as f:
 				self.kid = json.loads(f.read())["headers"]["Location"]
