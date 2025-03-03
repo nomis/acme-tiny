@@ -828,7 +828,7 @@ if __name__ == "__main__":
 	try:
 		main(sys.argv[1:])
 	except SystemExit:
-		pass
+		raise
 	except:
 		for line in traceback.format_exc().strip().split("\n"):
 			log.critical(line)
