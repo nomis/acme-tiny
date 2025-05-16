@@ -605,9 +605,15 @@ def cert(session, config_file, request_file, preferred_path=None, ari=None):
 	if not hostnames:
 		raise ValueError("No hostnames defined")
 
+	profile = config["DEFAULT"].get("profile", None)
+
 	# create a new order
 	payload = {"identifiers": [{"type": "dns", "value": hostname} for hostname in hostnames]}
+	if profile:
+		log.info(f"Profile {profile}")
+		payload["profile"] = profile
 	if ari:
+		log.info(f"Renewal {ari}")
 		payload["replaces"] = ari
 	code, order, order_headers = session.request(session.directory["newOrder"], payload, "Error creating order")
 
