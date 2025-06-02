@@ -115,12 +115,15 @@ def _ari_certid(data):
 		elif line == "X509v3 Authority Key Identifier:":
 			in_aki = True
 
-	if sn and aki and aki.startswith("keyid:"):
+	if aki and aki.startswith("keyid:"):
+		aki = aki.split(":", 1)[1]
+
+	if sn and aki:
 		sn = sn.replace(":", "")
 		if int(sn[0], 16) >= 8:
 			sn = "00" + sn
 		sn = _b64(binascii.unhexlify(sn))
-		aki = _b64(binascii.unhexlify(aki.split(":", 1)[1].replace(":", "")))
+		aki = _b64(binascii.unhexlify(aki.replace(":", "")))
 		return f"{aki}.{sn}"
 	else:
 		raise ValueError(f"Unknown Serial Number/Authority Key Identifier: {sn=!r} {aki=!r}")
