@@ -501,14 +501,14 @@ class Dns01ChallengeHandler(ChallengeHandler):
 		ns = set()
 		while True:
 			try:
-				resp = dns.resolver.query(name, "NS")
+				resp = dns.resolver.resolve(name, "NS")
 				if resp.rrset.name != name:
 					name = name.parent()
 					continue
 
 				for hostname in [str(x) for x in resp]:
 					try:
-						for rdata in dns.resolver.query(hostname, "A"):
+						for rdata in dns.resolver.resolve(hostname, "A"):
 							ns.add(str(rdata))
 					except dns.resolver.NXDOMAIN:
 						pass
@@ -516,7 +516,7 @@ class Dns01ChallengeHandler(ChallengeHandler):
 						pass
 
 					try:
-						for rdata in dns.resolver.query(hostname, "AAAA"):
+						for rdata in dns.resolver.resolve(hostname, "AAAA"):
 							ns.add(str(rdata))
 					except dns.resolver.NXDOMAIN:
 						pass
